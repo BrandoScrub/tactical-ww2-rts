@@ -271,8 +271,20 @@ const MAP = (() => {
   }
   function walkable(grid, m, x, y) { return x >= 0 && y >= 0 && x < m.w && y < m.h && !grid[(y | 0) * m.w + (x | 0)]; }
   function lineClear(grid, m, ax, ay, bx, by) {
-    const d = Math.hypot(bx - ax, by - ay), n = Math.ceil(d * 2);
+    const d = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(d * 2));   // at least one step: a zero-length line is clear if its point is
     for (let i = 0; i <= n; i++) if (!walkable(grid, m, ax + (bx - ax) * i / n, ay + (by - ay) * i / n)) return false;
+    return true;
+  }
+  /* the farthest point on the line from a toward b that can be reached in a straight line (a itself if blocked at once) */
+  function clearRun(grid, m, ax, ay, bx, by) {
+    const d = Math.hypot(bx - ax, by - ay), n = Math.ceil(d * 2);
+    let lx = ax, ly = ay;
+    for (let i = 1; i <= n; i++) { const x = ax + (bx - ax) * i / n, y = ay + (by - ay) * i / n; if (!walkable(grid, m, x, y)) break; lx = x; ly = y; }
+    return { x: lx, y: ly };
+  }
+  /* is a path still open from (x, y) through all its waypoints? (after the map changes, most paths still are) */
+  function pathOpen(grid, m, x, y, path) {
+    for (const p of path) { if (!lineClear(grid, m, x, y, p.x, p.y)) return false; x = p.x; y = p.y; }
     return true;
   }
   /* nearest walkable cell to (x, y) */
@@ -323,6 +335,6 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
+  return { create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;

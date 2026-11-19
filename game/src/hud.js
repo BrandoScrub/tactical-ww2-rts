@@ -104,6 +104,7 @@ const HUD = (() => {
   const selEnts = () => [...ui.selected].map(id => G.byId.get(id)).filter(e => e && !e.dead);
   function primary() { const s = selEnts(); return s[0] || null; }
   function centreOn(e) { if (!e) return; RENDER.cam.x = e.x; RENDER.cam.y = e.y; }
+  function centreOnGroup(ids) { const es = ids.map(id => G.byId.get(id)).filter(e => e && !e.dead); if (!es.length) return; RENDER.cam.x = es.reduce((a, e) => a + e.x, 0) / es.length; RENDER.cam.y = es.reduce((a, e) => a + e.y, 0) / es.length; }
   function groupOf(id) { const g = G.players[0].groups; for (const k in g) if (g[k].includes(id)) return k; return null; }
   ui.groupOf = groupOf;
   function selectBuildingType(defId) { const b = G.ents.filter(e => e.type === 'building' && e.owner === 0 && e.defId === defId && !e.dead); if (!b.length) return; ui.selected = new Set([b[0].id]); ui.page = 'main'; }
@@ -367,8 +368,8 @@ const HUD = (() => {
       if (e.button === 1) { mouse.pan = { x: e.clientX, y: e.clientY, cx: RENDER.cam.x, cy: RENDER.cam.y }; e.preventDefault(); }
     });
     window.addEventListener('mousemove', e => {
-      mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = !overHud(e.target); mouse.moved = true;
-      if (mouse.pan) { const k = RENDER.cam.k, dx = (e.clientX - mouse.pan.x) / (22 * k), dy = (e.clientY - mouse.pan.y) / (11 * k); RENDER.cam.x = mouse.pan.cx - (dx + dy) / 2; RENDER.cam.y = mouse.pan.cy - (dy - dx) / 2; }
+      mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = !overHud(e.target); mouse.inWindow = true; mouse.moved = true;
+      if (mouse.pan) { const k = RENDER.cam.k, dx = (e.clientX - mouse.pan.x) / (22 * k), dy = (e.clientY - mouse.pan.y) / (11 * k); RENDER.cam.x = mouse.pan.cx - (dx + dy) / 2; RENDER.cam.y = mouse.pan.cy - (dy - dx) / 2; RENDER.clampCam(G); }
     });
     window.addEventListener('mouseup', e => {
       if (e.button === 1) mouse.pan = null;
@@ -378,8 +379,10 @@ const HUD = (() => {
     canvasEl.addEventListener('wheel', e => { e.preventDefault(); const before = RENDER.toWorld(e.clientX, e.clientY); RENDER.cam.k *= e.deltaY < 0 ? 1.1 : 1 / 1.1; RENDER.clampCam(G); const after = RENDER.toWorld(e.clientX, e.clientY); RENDER.cam.x += before[0] - after[0]; RENDER.cam.y += before[1] - after[1]; }, { passive: false });
     window.addEventListener('mouseup', () => { mouse.mmDrag = false; });
     window.addEventListener('keydown', keyDown);
-    document.addEventListener('mouseleave', () => { mouse.inCanvas = false; });
+    document.addEventListener('mouseleave', () => { mouse.inCanvas = false; mouse.inWindow = false; });
     window.addEventListener('keyup', e => { keys.delete(e.key); });
+    // alt-tab with an arrow key held used to leave the camera scrolling forever: drop held keys and drags on blur
+    window.addEventListener('blur', () => { keys.clear(); mouse.pan = null; mouse.inWindow = false; });
   }
   function bindMinimapMouse() {
     el.mmc.addEventListener('mousedown', e => {
@@ -398,15 +401,28 @@ const HUD = (() => {
     if (k === ' ') { togglePause(); e.preventDefault(); return; }
     if (k === 'F10') { MAIN.menu(true); e.preventDefault(); return; }
     if (k === 'Home') { centreOn(SIM.hqOf(G, 0)); return; }
-    if (/^[0-9]$/.test(k)) {
-      const P = G.players[0];
-      if (e.ctrlKey || e.metaKey) { e.preventDefault(); for (const g in P.groups) P.groups[g] = P.groups[g].filter(id => !ui.selected.has(id)); P.groups[k] = [...ui.selected].filter(id => { const x = G.byId.get(id); return x && x.owner === 0; }); flash('Group ' + k + ' set'); }
-      else { const ids = (P.groups[k] || []).filter(id => G.byId.get(id)); if (ids.length) { if (performance.now() - (keyDown.last || 0) < 350 && keyDown.lastK === k) centreOn(G.byId.get(ids[0])); ui.selected = new Set(ids); ui.page = 'main'; } keyDown.last = performance.now(); keyDown.lastK = k; }
+    // number row by physical key, so Shift+1 is still 1 (on most layouts Shift+1 types '!')
+    const digit = /^Digit[0-9]$/.test(e.code || '') ? e.code[5] : /^[0-9]$/.test(k) ? k : null;
+    if (digit) {
+      const P = G.players[0], g = digit;
+      if (e.repeat) return;
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); for (const q in P.groups) P.groups[q] = P.groups[q].filter(id => !ui.selected.has(id)); P.groups[g] = [...ui.selected].filter(id => { const x = G.byId.get(id); return x && x.owner === 0; }); flash('Group ' + g + ' set'); }
+      else {
+        const ids = (P.groups[g] || []).filter(id => G.byId.get(id));
+        if (ids.length) {
+          if (e.shiftKey) ids.forEach(id => ui.selected.add(id));   // Shift+number: add the group to the selection
+          else { if (performance.now() - (keyDown.last || 0) < 350 && keyDown.lastK === g) centreOnGroup(ids); ui.selected = new Set(ids); }
+          ui.page = 'main';
+        }
+        keyDown.last = performance.now(); keyDown.lastK = g;
+      }
       return;
     }
+    if ((k === 'a' || k === 'A') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ui.selected = new Set(G.ents.filter(x => x.owner === 0 && !x.dead && x.type !== 'building').map(x => x.id)); ui.page = 'main'; return; }
     if (k === 't' || k === 'T') { const p = primary(); if (p && p.type === 'building' && p.def.retreat) { slotColAct('reinforce'); return; } }
     const idx = KEYS.indexOf(k.toUpperCase());
-    if (idx >= 0 && !e.ctrlKey && !e.metaKey) { pressSlot(idx); e.preventDefault(); return; }
+    // a held key used to repeat the order (five tanks queued from one press of a production key)
+    if (idx >= 0 && !e.ctrlKey && !e.metaKey) { e.preventDefault(); if (!e.repeat) pressSlot(idx); return; }
     if (k === '+' || k === '=') { RENDER.cam.k *= 1.1; RENDER.clampCam(G); } if (k === '-') { RENDER.cam.k /= 1.1; RENDER.clampCam(G); }
     if (k === 'F12' && e.shiftKey) ui.noFog = !ui.noFog;
   }
@@ -414,7 +430,7 @@ const HUD = (() => {
     const m = ui.mode, [wx, wy] = RENDER.toWorld(e.clientX, e.clientY);
     if (m) {
       const ids = m.ids || selEnts().filter(s => s.owner === 0).map(s => s.id);
-      if (m.type === 'attackMove' || m.type === 'reverse') { SIM.issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); if (!e.shiftKey) ui.mode = null; return; }
+      if (m.type === 'attackMove' || m.type === 'reverse') { SIM.issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); marker(wx, wy, m.type === 'attackMove' ? '#ff6a5a' : '#ffd36a'); pinnedNote(ids); if (!e.shiftKey) ui.mode = null; return; }
       if (m.type === 'ability') { const ent = G.byId.get(ids[0]); if (ent) SIM.issue(G, [ent.id], { type: 'ability', id: m.id, x: wx, y: wy }); ui.mode = null; return; }
       if (m.type === 'rally') { SIM.issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
       if (m.type === 'place') {
@@ -432,7 +448,8 @@ const HUD = (() => {
     const d = mouse.drag;
     if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) {
       const x0 = Math.min(d.x, e.clientX), x1 = Math.max(d.x, e.clientX), y0 = Math.min(d.y, e.clientY), y1 = Math.max(d.y, e.clientY);
-      const got = G.ents.filter(en => !en.dead && en.owner === 0 && en.type !== 'building' && (() => { const [sx, sy] = RENDER.toScreen(en.x, en.y); return sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1; })());
+      const inBox = (x, y) => { const [sx, sy] = RENDER.toScreen(x, y); return sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1; };
+      const got = G.ents.filter(en => !en.dead && en.owner === 0 && en.type !== 'building' && (en.type === 'squad' ? en.models.some(md => md.alive && inBox(md.x, md.y)) || (en.crew && en.crew.state !== 'packed' && inBox(en.crew.x, en.crew.y)) : inBox(en.x, en.y)));
       if (!d.shift) ui.selected.clear(); got.forEach(g => ui.selected.add(g.id)); ui.page = 'main'; return;
     }
     const t = entAt(e.clientX, e.clientY), now = performance.now();
@@ -461,11 +478,16 @@ const HUD = (() => {
     if (dragged) {
       // right-drag: move there and face the drag direction (team weapons set up that way)
       const [sx, sy] = RENDER.toWorld(r.x, r.y), face = Math.atan2(wy - sy, wx - sx);
-      SIM.issue(G, units, { type: 'move', x: sx, y: sy, face }, e.shiftKey); marker(sx, sy, '#7fe0ff'); return;
+      SIM.issue(G, units, { type: 'move', x: sx, y: sy, face }, e.shiftKey); marker(sx, sy, '#7fe0ff'); pinnedNote(units); return;
     }
-    SIM.issue(G, units, { type: 'move', x: wx, y: wy }, e.shiftKey); marker(wx, wy, '#7fe0ff');
+    SIM.issue(G, units, { type: 'move', x: wx, y: wy }, e.shiftKey); marker(wx, wy, e.shiftKey ? '#b8f0ff' : '#7fe0ff'); pinnedNote(units);
   }
   function marker(x, y, col) { G.fx.push({ kind: 'order', x, y, t: G.t, life: .8, col }); }
+  /* pinned squads only take a retreat order: say so instead of silently ignoring the click */
+  function pinnedNote(ids) {
+    const sq = ids.map(id => G.byId.get(id)).filter(x => x && x.type === 'squad');
+    if (sq.length && sq.some(x => SIM.isPinned(x))) flash(sq.every(x => SIM.isPinned(x)) ? 'Pinned down: only a retreat order works' : 'Some squads are pinned down and stay put');
+  }
 
   /* ---------------- touch: tap to select or order, drag to pan, pinch to zoom, long-press to attack-move ---------------- */
   const touch = { pts: new Map(), start: null, moved: false, pinch: null, lastTap: 0 };
@@ -483,7 +505,7 @@ const HUD = (() => {
   }
   function longPressAt(x, y) {
     const ids = selEnts().filter(s => s.owner === 0 && s.type !== 'building').map(s => s.id); if (!ids.length) return;
-    const [wx, wy] = RENDER.toWorld(x, y); SIM.issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move');
+    const [wx, wy] = RENDER.toWorld(x, y); SIM.issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move'); pinnedNote(ids);
   }
   function bindTouch() {
     bindTouchHud();
@@ -561,12 +583,15 @@ const HUD = (() => {
   function syncToolbar() { if (!el.tbar) return; el.tbar.querySelector('[data-t=box]').classList.toggle('on', !!ui.boxMode); el.tbar.querySelector('[data-t=multi]').classList.toggle('on', !!ui.multi); }
 
   /* per-frame input work: edge pan, arrow keys, hover, ghosts, cover preview */
+  let lastSig = '';
   function tick(dt) {
+    const sig = [...ui.selected].join(',') + '|' + (ui.mode ? ui.mode.type : '') + '|' + ui.page;
+    if (sig !== lastSig) { lastSig = sig; update(); }
     const c = RENDER.cam, sp = 60 / c.k * dt;
     let dx = 0, dy = 0;
     if (keys.has('ArrowLeft')) dx -= 1; if (keys.has('ArrowRight')) dx += 1; if (keys.has('ArrowUp')) dy -= 1; if (keys.has('ArrowDown')) dy += 1;
     const edge = 6;
-    if (!ui.touch && mouse.moved && mouse.inCanvas && document.hasFocus()) { if (mouse.x < edge) dx -= 1; if (mouse.x > RENDER.W - edge) dx += 1; if (mouse.y < edge) dy -= 1; if (mouse.y > RENDER.H - edge) dy += 1; }
+    if (!ui.touch && mouse.moved && mouse.inWindow && !MAIN.inMenu() && document.hasFocus()) { if (mouse.x < edge) dx -= 1; if (mouse.x > RENDER.W - edge) dx += 1; if (mouse.y < edge) dy -= 1; if (mouse.y > RENDER.H - edge) dy += 1; }
     if (dx || dy) { c.x += (dx + dy) * sp * .5; c.y += (dy - dx) * sp * .5; }
     RENDER.clampCam(G);
     const t = mouse.inCanvas ? entAt(mouse.x, mouse.y) : null; ui.hover = t ? t.id : null;

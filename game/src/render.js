@@ -532,6 +532,13 @@ const RENDER = (() => {
           c.beginPath(); let [sx, sy] = toScreen(e.x, e.y); c.moveTo(sx, sy); for (const p of e.path) { [sx, sy] = toScreen(p.x, p.y); c.lineTo(sx, sy); } c.stroke(); c.setLineDash([]);
           const end = e.path[e.path.length - 1], [ex, ey] = toScreen(end.x, end.y); c.fillStyle = 'rgba(150,230,255,.8)'; c.beginPath(); c.ellipse(ex, ey, 5 * k, 2.5 * k, 0, 0, U.TAU); c.fill();
         }
+        // shift-queued waypoints: a fainter line on from the current destination, a dot at each stop
+        if (e.queue && e.queue.length) {
+          const from = e.path && e.path.length ? e.path[e.path.length - 1] : e;
+          c.strokeStyle = 'rgba(184,240,255,.4)'; c.setLineDash([3 * k, 5 * k]); c.lineWidth = 1.3 * k;
+          c.beginPath(); let [qx, qy] = toScreen(from.x, from.y); c.moveTo(qx, qy); for (const q of e.queue) { [qx, qy] = toScreen(q.x, q.y); c.lineTo(qx, qy); } c.stroke(); c.setLineDash([]);
+          c.fillStyle = 'rgba(184,240,255,.7)'; for (const q of e.queue) { const [px, py] = toScreen(q.x, q.y); c.beginPath(); c.ellipse(px, py, 4 * k, 2 * k, 0, 0, U.TAU); c.fill(); }
+        }
         if (e.type === 'building') { const [rx, ry] = toScreen(e.rally.x, e.rally.y), [tx, ty] = toScreen(e.rally.x, e.rally.y, 2.2); c.strokeStyle = '#ddd'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(rx, ry); c.lineTo(tx, ty); c.stroke(); c.fillStyle = '#5ad6ff'; c.fillRect(tx, ty, 11 * k, 7 * k); }
         // team weapon firing arc
         if (e.type === 'squad' && e.crew && e.crew.state !== 'packed') {

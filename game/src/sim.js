@@ -143,14 +143,32 @@ const SIM = (() => {
   function issue(G, ids, o, queue) {
     const ents = ids.map(id => G.byId.get(id)).filter(e => e && !e.dead);
     if (o.type === 'move' || o.type === 'attackMove' || o.type === 'reverse') {
+      const units = ents.filter(e => e.type !== 'building'), n = units.length;
+      for (const b of ents) if (b.type === 'building') buildingOrder(G, b, o);
+      if (!n) return;
       // spread a group round the click so squads don't stack
-      const n = ents.length, offs = formationOffsets(n, null);
-      const cx = ents.reduce((a, e) => a + e.x, 0) / (n || 1), cy = ents.reduce((a, e) => a + e.y, 0) / (n || 1);
-      const ang = Math.atan2(o.y - cy, o.x - cx);
-      ents.forEach((e, i) => {
-        const of = offs[i], sp = e.type === 'vehicle' ? 3.2 : 4.2;
-        const tx = o.x + (Math.cos(ang) * of.f - Math.sin(ang) * of.s) * sp, ty = o.y + (Math.sin(ang) * of.f + Math.cos(ang) * of.s) * sp;
-        orderEnt(G, e, { ...o, x: n > 1 ? tx : o.x, y: n > 1 ? ty : o.y, face: ang }, queue);
+      const offs = formationOffsets(n, null);
+      const cx = units.reduce((a, e) => a + e.x, 0) / n, cy = units.reduce((a, e) => a + e.y, 0) / n;
+      const ang = o.face != null && n > 1 ? o.face : Math.atan2(o.y - cy, o.x - cx), ca = Math.cos(ang), sa = Math.sin(ang);
+      // give each unit the slot that matches where it stands in the group now, so paths do not cross
+      // (greedy on the shape: a unit on the left of the group takes a slot on the left of the formation)
+      const rel = units.map(e => { const dx = e.x - cx, dy = e.y - cy, sp = e.type === 'vehicle' ? 3.2 : 4.2; return { f: (dx * ca + dy * sa) / sp, s: (-dx * sa + dy * ca) / sp }; });
+      const pairs = [];
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) pairs.push([(rel[i].f - offs[j].f) ** 2 + (rel[i].s - offs[j].s) ** 2, i, j]);
+      pairs.sort((a, b) => a[0] - b[0]);
+      const slotOf = new Array(n).fill(-1), taken = new Array(n).fill(false); let left = n;
+      for (const [, i, j] of pairs) { if (slotOf[i] >= 0 || taken[j]) continue; slotOf[i] = j; taken[j] = true; if (!--left) break; }
+      const nav = MAP.navGrids(G.map);
+      units.forEach((e, i) => {
+        const of = offs[slotOf[i]], sp = e.type === 'vehicle' ? 3.2 : 4.2;
+        let tx = o.x, ty = o.y;
+        if (n > 1) {
+          // a slot behind a wall or inside a house is pulled back toward the click, not routed round the obstacle
+          const grid = e.type === 'vehicle' ? nav.veh : nav.inf, c = MAP.nearestOpen(grid, G.map, o.x, o.y);
+          const p = MAP.clearRun(grid, G.map, c.x, c.y, o.x + (ca * of.f - sa * of.s) * sp, o.y + (sa * of.f + ca * of.s) * sp);
+          tx = p.x; ty = p.y;
+        }
+        orderEnt(G, e, { ...o, x: tx, y: ty, face: o.face != null ? o.face : (n > 1 ? ang : null) }, queue);
       });
       return;
     }
@@ -172,13 +190,24 @@ const SIM = (() => {
     e.queue = [];
     if (e.type === 'squad' && e.models.some(m => m.alive) && isPinned(e) && o.type !== 'retreat') return;   // pinned squads only retreat
     switch (o.type) {
-      case 'stop': e.order = { type: 'idle' }; e.path = null; e.target = null; e.retreating = false; e.forceTarget = null; break;
+      case 'stop': e.order = { type: 'idle' }; e.path = null; e.target = null; e.retreating = false; e.forceTarget = null; e.autoRev = false; e.faceTo = null; break;
       case 'move': case 'attackMove': case 'reverse':
         // a team weapon told to go where it already stands just turns to face the new way
         if (e.crew && e.crew.state !== 'packed' && Math.hypot(o.x - e.crew.x, o.y - e.crew.y) < 3) { if (o.face != null && Math.abs(U.angNorm(o.face - e.crew.heading)) > .3) setup(G, e, o.face); return; }
         e.retreating = false; e.forceTarget = null;
         e.order = { type: o.type, x: o.x, y: o.y, face: o.face };
+        // a squad standing still starts from where its men are, not from an anchor that lagged behind them
+        if (e.type === 'squad' && !e.moving && !(e.crew && e.crew.state !== 'packed')) {
+          const al = e.models.filter(m => m.alive);
+          if (al.length) { const mx = al.reduce((a, m) => a + m.x, 0) / al.length, my = al.reduce((a, m) => a + m.y, 0) / al.length; if (MAP.walkable(MAP.navGrids(G.map).inf, G.map, mx, my)) { e.x = mx; e.y = my; } }
+        }
         setPath(G, e, o.x, o.y);
+        if (e.type === 'vehicle') {
+          e.faceTo = null;
+          // CoH: a short move to a spot behind the vehicle backs up instead of turning round
+          const d = Math.hypot(o.x - e.x, o.y - e.y), off = Math.abs(U.angNorm(Math.atan2(o.y - e.y, o.x - e.x) - e.heading));
+          e.autoRev = o.type === 'move' && d < 16 && off > 2.2 && e.path && e.path.length === 1;
+        }
         if (e.crew && e.crew.state !== 'packed') teardown(G, e);
         if (e.type === 'squad') e.slots = null;
         if (e.buildQueue && e.buildQueue.length && !o.keepBuild) e.buildQueue = [];
@@ -310,7 +339,10 @@ const SIM = (() => {
       const px = job.kind === 'building' ? tgt.x : (tgt.ax + tgt.bx) / 2, py = job.kind === 'building' ? tgt.y : (tgt.ay + tgt.by) / 2;
       const reach = job.kind === 'building' ? Math.max(tgt.w, tgt.d) / 2 + 3 : 3.5;
       const d = Math.hypot(sq.x - px, sq.y - py);
-      if (d > reach) {
+      // walk in to `reach`, keep working out to reach + 3 m: with one threshold the squad's anchor, drifting toward its
+      // men, crossed it back and forth and the engineers flickered between walking and building
+      if (d > reach + (sq.building ? 3 : 0)) {
+        sq.building = false;
         // a job it cannot reach for 20 s is dropped (the building or wall stays, another squad can finish it)
         sq.reachT = (sq.reachT || 0) + dt; if (sq.reachT > 20) { sq.reachT = 0; sq.buildQueue.shift(); event(G, sq.owner, 'error', 'Engineers cannot reach the construction site', px, py); continue; }
         if (!sq.path || !sq.path.length) { const side = job.kind === 'building' ? nearEdge(sq, tgt) : { x: px - Math.sin(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6, y: py + Math.cos(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6 }; setPath(G, sq, side.x, side.y); } return true; }
@@ -388,7 +420,12 @@ const SIM = (() => {
     const alive = sq.models.filter(m => m.alive);
     if (!alive.length) return;
     const nav = MAP.navGrids(G.map).inf;
-    if (sq.path && sq.pathVer !== G.map.version && sq.path.length) { const end = sq.path[sq.path.length - 1]; setPath(G, sq, end.x, end.y); }
+    // the map changed (something built or destroyed somewhere): find a new way only if this one is now blocked,
+    // so squads do not re-route, and their men lose the leader's trail, every time a sandbag goes up across the map
+    if (sq.path && sq.pathVer !== G.map.version && sq.path.length) {
+      if (MAP.pathOpen(nav, G.map, sq.x, sq.y, sq.path)) sq.pathVer = G.map.version;
+      else { const end = sq.path[sq.path.length - 1]; setPath(G, sq, end.x, end.y); }
+    }
     let moving = false;
     if (sq.path && sq.path.length && !(sq.order.type === 'attackMove' && sq.engageT > G.t)) {
       const sp = squadSpeed(sq) * dt, wp = sq.path[0];
@@ -449,6 +486,7 @@ const SIM = (() => {
     if (sq.queue && sq.queue.length) { const n = sq.queue.shift(); sq.order = { type: n.type, x: n.x, y: n.y, face: n.face }; setPath(G, sq, n.x, n.y); return; }
     if (o.type === 'move' || o.type === 'attackMove') {
       sq.order = { type: 'idle' };
+      if (o.face != null && !sq.crew) sq.heading = o.face;
       if (sq.crew && sq.crew.state === 'packed') setup(G, sq, o.face != null ? o.face : sq.heading);
     }
     if (o.type === 'retreat') { sq.order = { type: 'idle' }; sq.retreating = false; sq.supp = 0; sq.suppState = 0; }
@@ -490,27 +528,49 @@ const SIM = (() => {
 
   function stepVehicleMove(G, v, dt) {
     const def = v.def;
-    if (v.path && v.pathVer !== G.map.version && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); }
+    if (v.path && v.pathVer !== G.map.version && v.path.length) {
+      if (MAP.pathOpen(MAP.navGrids(G.map).veh, G.map, v.x, v.y, v.path)) v.pathVer = G.map.version;
+      else { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); }
+    }
     // a vehicle found inside an obstacle (a building raised round it, a wreck) is moved to open ground at once
     { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
     let target = null;
     if (v.path && v.path.length && !(v.order.type === 'attackMove' && v.engageT > G.t)) target = v.path[0];
     const accel = def.accel, maxSp = def.speed * (v.vet >= 3 && v.defId === 'us_chaffee' ? 1.33 : 1);
+    const grid = MAP.navGrids(G.map).veh, rot = def.rot * Math.PI / 180;
+    // the next waypoint already in a straight, clear line: head for it now instead of driving into the corner
+    if (target && v.path.length > 1 && (v.skipT = (v.skipT || 0) - dt) <= 0) {
+      v.skipT = .2;
+      if (MAP.lineClear(grid, G.map, v.x, v.y, v.path[1].x, v.path[1].y)) { v.path.shift(); target = v.path[0]; }
+    }
     if (target) {
       const dx = target.x - v.x, dy = target.y - v.y, d = Math.hypot(dx, dy);
-      const rev = v.order.type === 'reverse';
+      const rev = v.order.type === 'reverse' || v.autoRev;
       const want = Math.atan2(dy, dx) + (rev ? Math.PI : 0);
-      v.heading = U.turnTo(v.heading, want, def.rot * Math.PI / 180 * dt);
+      v.heading = U.turnTo(v.heading, want, rot * dt);
       const off = Math.abs(U.angNorm(want - v.heading));
-      const desired = off > 1.2 ? maxSp * .15 : off > .5 ? maxSp * .5 : maxSp * (rev ? .45 : 1);
-      const slow = v.path.length === 1 ? Math.min(1, d / 6 + .2) : 1;
-      v.speed = U.approach(v.speed, desired * slow, accel * dt);
+      // ease off smoothly with heading error rather than in steps; nearly stop only for a turn on the spot
+      let desired = (off > 1.2 ? .15 : U.lerp(1, .35, off / 1.2)) * maxSp * (rev ? .45 : 1);
+      if (v.path.length === 1) desired *= Math.min(1, d / 6 + .2);
+      else {
+        // brake ahead of a sharp corner so the turn is made rolling, not by overshooting and crawling back
+        const n = v.path[1], turn = Math.abs(U.angNorm(Math.atan2(n.y - target.y, n.x - target.x) - Math.atan2(dy, dx)));
+        const cornerSp = maxSp * U.clamp(1 - turn / 2.4, .3, 1), brake = (v.speed * v.speed - cornerSp * cornerSp) / (2 * accel) + 1;
+        if (d < brake) desired = Math.min(desired, cornerSp);
+      }
+      v.speed = U.approach(v.speed, desired, accel * dt);
       if (d < 1.5 || (d < v.speed * dt * 2)) { v.path.shift(); if (!v.path.length) vehicleArrive(G, v); }
-    } else v.speed = U.approach(v.speed, 0, accel * 2 * dt);
+    } else {
+      v.speed = U.approach(v.speed, 0, accel * 2 * dt);
+      // told to face a way (right-drag): turn there once stopped, unless the gun is busy aiming the hull
+      if (v.faceTo != null && v.speed < .3) {
+        if (v.order.type === 'attack' || G.t - v.lastFire < 3) v.faceTo = null;
+        else { v.heading = U.turnTo(v.heading, v.faceTo, rot * dt); if (Math.abs(U.angNorm(v.faceTo - v.heading)) < .02) v.faceTo = null; }
+      }
+    }
     if (v.speed > .01) {
-      const dir = v.order.type === 'reverse' ? -1 : 1;
+      const dir = v.order.type === 'reverse' || v.autoRev ? -1 : 1;
       const nx = v.x + Math.cos(v.heading) * v.speed * dt * dir, ny = v.y + Math.sin(v.heading) * v.speed * dt * dir;
-      const grid = MAP.navGrids(G.map).veh;
       if (MAP.walkable(grid, G.map, nx, ny) || !MAP.walkable(grid, G.map, v.x, v.y)) { v.x = nx; v.y = ny; v.dist += v.speed * dt; v.stuckT = 0; }
       else {
         // sidestep: try sliding past the corner before giving up
@@ -525,12 +585,13 @@ const SIM = (() => {
     for (const o of G.ents) {
       if (o === v || o.type !== 'vehicle' || o.dead) continue;
       const dx = v.x - o.x, dy = v.y - o.y, d = Math.hypot(dx, dy), r = (v.def.width + o.def.width) * .6 + 1;
-      if (d < r && d > .01) { const push = (r - d) * .5 * dt * 4; v.x += dx / d * push; v.y += dy / d * push; }
+      if (d < r && d > .01) { const push = (r - d) * .5 * dt * 4, px = v.x + dx / d * push, py = v.y + dy / d * push; if (MAP.walkable(MAP.navGrids(G.map).veh, G.map, px, py)) { v.x = px; v.y = py; } }
     }
   }
   function vehicleArrive(G, v) {
-    if (v.queue && v.queue.length) { const n = v.queue.shift(); v.order = { type: n.type, x: n.x, y: n.y }; setPath(G, v, n.x, n.y); return; }
-    if (v.order.type !== 'attack') v.order = { type: 'idle' };
+    v.autoRev = false;
+    if (v.queue && v.queue.length) { const n = v.queue.shift(); v.order = { type: n.type, x: n.x, y: n.y, face: n.face }; setPath(G, v, n.x, n.y); return; }
+    if (v.order.type !== 'attack') { if (v.order.face != null && v.order.type !== 'reverse') v.faceTo = v.order.face; v.order = { type: 'idle' }; }
   }
   function crush(G, v) {
     for (const c of MAP.coversNear(G.map, v.x, v.y)) {
