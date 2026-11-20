@@ -456,7 +456,12 @@ const RENDER = (() => {
     for (const e of G.ents) {
       if (e.dead) continue;
       if (!FOG.shown(G, e)) continue;
-      if (e.type === 'building') { if (vis(e.x, e.y, 300)) list.push({ d: e.x + e.y + (e.w + e.d) * .2, f: () => drawBuilding(G, c, e, k, ui) }); continue; }
+      if (e.type === 'building') {
+        if (!vis(e.x, e.y, 300)) continue;
+        list.push({ d: e.x + e.y + (e.w + e.d) * .2, f: () => drawBuilding(G, c, e, k, ui) });
+        const art = baseArt(e); if (art) { const [nx, ny] = toScreen(e.x + e.w / 2, e.y + e.d / 2); shadows.push(() => ArtKit.drawShadow(c, R.lib, art, baseState(e), nx, ny, k)); }
+        continue;
+      }
       if (e.type === 'vehicle') { if (vis(e.x, e.y, 200)) { list.push({ d: e.x + e.y, f: () => drawVehicle(G, c, e, k) }); shadows.push(() => drawVehicleShadow(G, c, e, k)); } continue; }
       if (e.type === 'squad') {
         if (!vis(e.x, e.y, 120)) continue;
@@ -837,7 +842,14 @@ const RENDER = (() => {
     drawFace(c, art.A, art.A.r[1], [x0, y1, H], [1, 0, 0], [0, 0, -1]);
     return true;
   }
+  /* Base buildings: the artkit sprites (art/bases/, tools/build_bases.py), drawn from the footprint's near corner like the
+     farmhouses, with the flag in the owner's colour. Stages: build33 / build66 while going up, damaged under half health.
+     Without the art the canvas stand-in below shows. */
+  const baseArt = b => R.lib['base_' + b.defId] ? 'base_' + b.defId : null;
+  const baseState = b => b.built < .5 ? 'build33' : b.built < 1 ? 'build66' : b.hp < b.maxHp * .5 ? 'damaged' : 'normal';
   function drawBuilding(G, c, b, k, ui) {
+    const art = baseArt(b);
+    if (art) { const [nx, ny] = toScreen(b.x + b.w / 2, b.y + b.d / 2); ArtKit.drawStatic(c, R.lib, art, baseState(b), nx, ny, k, 0, b.owner); return; }
     const x0 = b.x - b.w / 2, x1 = b.x + b.w / 2, y0 = b.y - b.d / 2, y1 = b.y + b.d / 2, side = G.players[b.owner].side;
     const H = (b.def.retreat ? 3.2 : 4.6) * Math.max(.08, b.built);
     const [sx, sy] = toScreen(b.x, b.y);

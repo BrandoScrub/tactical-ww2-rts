@@ -45,6 +45,12 @@ const MAIN = (() => {
       bar(.70, 'Loading buildings…');      // map buildings (tools/build_scenery.py); without them the drawn stand-ins show
       const scenery = await fetch(ART + 'scenery.json').then(r => r.ok ? r.json() : {}, () => ({}));
       await new Promise(res => { if (!Object.keys(scenery).length) res(); else ArtKit.load(ART, scenery, lib, () => res()); });
+      // base buildings (tools/build_bases.py), as base_<key>; their flags take the players' colours
+      const bases = await fetch(ART + 'bases.json').then(r => r.ok ? r.json() : {}, () => ({}));
+      const bkeys = {}; for (const k in bases) bkeys['base_' + k] = bases[k];
+      await new Promise(res => { if (!Object.keys(bkeys).length) res(); else ArtKit.load(ART, bkeys, lib, () => res()); });
+      const bl = {}; for (const k in bkeys) if (lib[k]) bl[k] = lib[k];
+      ArtKit.teams(bl, [[74, 163, 255], [255, 90, 74]]);
       bar(.71, 'Loading ground textures…'); await Promise.all([RENDER.loadGround(ART + 'ground/'), RENDER.loadMats(ART + 'materials/'), RENDER.loadProps(ART)]);
       bar(.72, 'Building the battlefield…'); await frame();
       BG = SIM.create({ seed: 7, playerSide: 'us', crewLayout: layout });
