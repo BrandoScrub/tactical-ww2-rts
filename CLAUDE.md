@@ -17,4 +17,7 @@ The same text is in `CLAUDE.md` and `AGENTS.md`; change both together.
   exists, `standIn` where not); `data/units.json` stays the art roster. Before a commit that touches `game/`:
   `node game/test/soak.js 8 18` prints `no problems`, and `game/test/flow.py de` and `game/test/mobile.py` print
   `no page errors` (serve the root on port 8765 first). Keep the PC and phone layouts both working.
+- **Map buildings** (farmhouses) are `models/scenery.py`, exported by `python3 tools/build_scenery.py` into `art/scenery/` and
+  `art/scenery.json` (apart from the unit art). A new house footprint in `game/src/map.js` needs a variant there and in
+  `HOUSE_ART`; `node game/test/houses.js` must print `no problems`. Commit `art/scenery*` with the change.
 - Before a commit: `python3 tools/check.py` prints `TOTAL 0`; `python3 tools/update_artkit.py --verify` passes.

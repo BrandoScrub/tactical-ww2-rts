@@ -58,6 +58,10 @@ def farmhouse(w=9.0, d=7.0, wall='stucco', stair=True, tower=False, state='norma
             y = f; a.add(n, blk(w - .02, w + .02, y - ww / 2, y + ww / 2, z, z + hh, 'opening'), tag='opening')
             a.add(n + '_sill', blk(w, w + .12, y - ww / 2 - .08, y + ww / 2 + .08, z - .1, z, 'stone_dressed'), tag='trim')  # why: a stone sill throws water clear of the wall
             for s in (-1, 1): a.add(n + f'_shutter{s}', blk(w, w + .05, y + s * (ww / 2 + .02), y + s * (ww / 2 + .42), z, z + hh, 'shutter'), tag='accent')  # why: louvred shutters fold back against the wall
+        elif side == '-x':                                                                                # the x = 0 end: seen when the house is turned
+            y = f; a.add(n, blk(-.02, .02, y - ww / 2, y + ww / 2, z, z + hh, 'opening'), tag='opening')
+            a.add(n + '_sill', blk(-.12, 0, y - ww / 2 - .08, y + ww / 2 + .08, z - .1, z, 'stone_dressed'), tag='trim')
+            for s in (-1, 1): a.add(n + f'_shutter{s}', blk(-.05, 0, y + s * (ww / 2 + .02), y + s * (ww / 2 + .42), z, z + hh, 'shutter'), tag='accent')
         else:
             x = f; a.add(n, blk(x - ww / 2, x + ww / 2, d - .02, d + .02, z, z + hh, 'opening'), tag='opening')
             a.add(n + '_sill', blk(x - ww / 2 - .08, x + ww / 2 + .08, d, d + .12, z - .1, z, 'stone_dressed'), tag='trim')
@@ -69,6 +73,10 @@ def farmhouse(w=9.0, d=7.0, wall='stucco', stair=True, tower=False, state='norma
     for y in (d * .25, d * .75):
         if not (dmg and y > d / 2): window('x', y, 2.6)
     if dmg: breach_x(a, w, d)
+    # -x gable end: an upper window either side of the flue wall and a small one below; it faces the camera when the
+    # house is turned (ridge along y), so it needs openings like the other seen walls
+    for y in (d * .3, d * .7): window('-x', y, 2.6)
+    window('-x', d * .5, 1.0, .6, .7)
     # +y long wall: ground-floor windows small and high (stores), upper ones larger (rooms)
     xs = [w * f for f in ((.2, .5, .8) if w >= 8 else (.3, .7))]
     for x in xs: window('y', x, 2.6)
@@ -139,16 +147,22 @@ def breach_x(a, w, d):
     a.add('breach_spill_tiles', sh.rock(1.0 * M, 'stone_rough', seed=9, detail=1, flatten=.45).move((w + .9) * M, (yc - .9) * M, 0), grounded=True, tag='yard')
 
 
-def farmhouse_ruin(w=9.0, d=7.0, wall='stucco', stair=True, tower=False):
-    """Shelled to a shell: roof and floors burned and fallen in, walls broken down to a ragged line that stands
-    highest at the corners (dressed corner stones hold longest), the masonry stair left standing, the inside heaped
-    with rubble and charred beams. Gameplay: no garrison, low walls give cover, sight passes over most of it.
-    Returns (geometry, check issues of the parts added)."""
+def turned(g, w, turn):
+    """The house geometry turned so its ridge runs along y (turn=3: a quarter turn clockwise seen from above).
+    The +y side (the stair) comes round to +x, so the two walls the camera sees are still the detailed ones."""
+    if not turn: return g
+    from artkit.core.geom import T, RZ
+    return g.at(T(0, w * M, 0) @ RZ(-90.0))
+
+
+def _ruin_walls(w, d, wall, stair, tower, turn=0):
+    """The standing walls of the ruin: the whole house clipped at a ragged line. Turned before the cut, so the
+    cut-open insides darken for the turned view."""
     from artkit.recipe import Asset
     import numpy as np
-    whole = farmhouse(w, d, wall, stair, tower)
-    g = whole.geometry(); H = float(g.bounds()[1][2])
-    c = g.P.mean(1) / M                                                               # triangle centres in metres
+    g = turned(farmhouse(w, d, wall, stair, tower).geometry(), w, turn)
+    if turn % 2: w, d = d, w                                                          # the ragged line is laid out on the turned house, so
+    c = g.P.mean(1) / M                                                               # the far-right corner stands tallest in both views
     rng = np.random.default_rng(int(w * 7 + d * 3))
     ph = rng.random(4) * 6
     rag = .55 * np.sin(c[:, 0] * 1.7 + ph[0]) + .4 * np.sin(c[:, 1] * 2.3 + ph[1]) + .3 * np.sin((c[:, 0] + c[:, 1]) * 4.1 + ph[2])
@@ -157,9 +171,10 @@ def farmhouse_ruin(w=9.0, d=7.0, wall='stucco', stair=True, tower=False):
         lim = np.maximum(lim, top - 1.0 * np.hypot(c[:, 0] - cx, c[:, 1] - cy) + .3 * rag)
     for (cx, cy, r) in ((w * .55, d, 1.0), (w, d * .4, .8)):                          # shell gaps broken down near the ground
         lim = np.where(np.hypot(c[:, 0] - cx, c[:, 1] - cy) < r, np.minimum(lim, .5 + .2 * rag), lim)
-    out = Asset._cut(g, lim * M, M)                                                   # H = 1 m: only parts under 30 cm are kept or lost whole, the rest clip at the line
-    r = Assembly()
-    r.add('ruin', out, grounded=True, tag='body')
+    return Asset._cut(g, lim * M, M)                                                 # H = 1 m: only parts under 30 cm are kept or lost whole
+
+
+def _ruin_debris(r, w, d):
     r.add('burnt_floor', blk(.15, w - .15, .15, d - .15, 0, .6, 'charred'), grounded=True, tag='yard')          # why: ash and burnt timber cover the ground floor
     r.add('floor_rubble', sh.rock(min(w, d) * .7 * M, 'rubble', seed=2, detail=2, flatten=.45).move(w * .5 * M, d * .5 * M, 0), grounded=True, tag='yard')   # why: the fallen floors, roof and wall tops fill the inside
     r.add('heap_a', sh.rock(2.2 * M, 'rubble', seed=3, detail=1, flatten=.6).move(w * .3 * M, d * .35 * M, .3 * M), grounded=True, tag='yard')           # why: the heaviest fall, under where the tower or chimney stood
@@ -174,11 +189,42 @@ def farmhouse_ruin(w=9.0, d=7.0, wall='stucco', stair=True, tower=False):
     return r
 
 
+def farmhouse_ruin(w=9.0, d=7.0, wall='stucco', stair=True, tower=False):
+    """Shelled to a shell: roof and floors burned and fallen in, walls broken down to a ragged line that stands
+    highest at the corners (dressed corner stones hold longest), the masonry stair left standing, the inside heaped
+    with rubble and charred beams. Gameplay: no garrison, low walls give cover, sight passes over most of it."""
+    r = Assembly()
+    r.add('ruin', _ruin_walls(w, d, wall, stair, tower), grounded=True, tag='body')
+    return _ruin_debris(r, w, d)
+
+
+def states(w=9.0, d=7.0, wall='stucco', stair=True, tower=False, turn=0):
+    """name -> Geometry for the game's three stages, turned when asked."""
+    kw = dict(w=w, d=d, wall=wall, stair=stair, tower=tower)
+    out = {st: turned(farmhouse(state=st, **kw).geometry(), w, turn) for st in ('normal', 'damaged')}
+    W, D = (d, w) if turn % 2 else (w, d)
+    out['ruined'] = _ruin_debris(Assembly(), W, D).geometry() + _ruin_walls(turn=turn, **kw)   # debris laid out on the turned footprint
+    return out
+
+
+def asset(key, turn=0):
+    """An artkit Asset with the three hand-made stages, for artkit.export.Exporter.static."""
+    from artkit.recipe import Asset, TILE
+    kw = VARIANTS[key]; S = states(turn=turn, **kw)
+    w, d = (kw['d'], kw['w']) if turn % 2 else (kw['w'], kw['d'])
+
+    class Staged(Asset):
+        def states(s): return S
+    return Staged({'name': key + ('_r' if turn else ''), 'footprint': [w * M / TILE, d * M / TILE]}, geom=S['normal'])
+
+
 VARIANTS = {
     'farmhouse_stair':  dict(w=9, d=7, wall='stucco', stair=True),
     'farmhouse_tower':  dict(w=9, d=6, wall='stone', stair=True, tower=True),
     'farmhouse_small':  dict(w=7, d=6, wall='stone', stair=False),
     'cottage':          dict(w=6, d=6, wall='stucco', stair=False),
+    'farmhouse_long':   dict(w=8, d=6, wall='stucco', stair=True),                 # the map's 8 x 6 m houses
+    'farmhouse_square': dict(w=7, d=7, wall='stucco', stair=False, tower=True),    # and its 7 x 7 m one: a small tower house
 }
 
 
