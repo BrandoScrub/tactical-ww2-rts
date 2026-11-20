@@ -414,7 +414,7 @@ const COMBAT = (() => {
   const CRIT = { base: .035, low: .22, minDmg: 30, minDmgLight: 12, shock: 6, abandon: .22, abandonHp: .08,
     names: { engine1: 'Engine damaged', engine2: 'Immobilised', gun: 'Main gun destroyed', shock: 'Crew shocked' } };
   function rollCrit(G, v, dmg) {
-    if (dmg < (v.def.light ? CRIT.minDmgLight : CRIT.minDmg)) return;
+    if (dmg < (v.def.soft ? CRIT.minDmgLight : CRIT.minDmg)) return;
     const hf = Math.max(0, v.hp / v.maxHp);
     if (G.rng() > CRIT.base + CRIT.low * (1 - hf)) return;
     const c = v.crit || (v.crit = { engine: 0, gun: false, shockT: 0 }), r = G.rng();

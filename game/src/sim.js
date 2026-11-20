@@ -609,9 +609,10 @@ const SIM = (() => {
      up by swapping it for a man's rifle (two picked-up weapons a squad at most). Blasts can wreck what lies there. */
   const DROPS = { chance: .55, life: 180, hp: 120, reach: 2, perSquad: 2,
     weapons: { bar: 'lmg', mg42lmg: 'lmg', bazooka: 'rocket_gunner', schreck: 'rocket_gunner' } };
+  const dropSprite = k => k && DROPS.weapons[(D.W[k] && D.W[k].base) || k]; // squads own their guns ('us_riflemen:bar')
   function dropWeapon(G, kind, props) { (G.drops = G.drops || []).push({ id: G.nextDrop = (G.nextDrop || 0) + 1, kind, t: G.t, hp: DROPS.hp, ...props }); }
   function onModelDeath(G, sq, m) {
-    if (m.weapon && DROPS.weapons[m.weapon] && G.rng() < DROPS.chance) dropWeapon(G, 'weapon', { weapon: m.weapon, x: m.x + G.rng.range(-.4, .4), y: m.y + G.rng.range(-.4, .4), side: sq.weaponSide || G.players[sq.owner].side });
+    if (dropSprite(m.weapon) && G.rng() < DROPS.chance) dropWeapon(G, 'weapon', { weapon: m.weapon, x: m.x + G.rng.range(-.4, .4), y: m.y + G.rng.range(-.4, .4), side: sq.weaponSide || G.players[sq.owner].side });
     if (sq.def.crewWeapon && !sq.models.some(q => q.alive)) {
       const c = sq.crew, deployed = c && c.state !== 'packed';
       dropWeapon(G, 'team', { defId: sq.defId, x: deployed ? c.x : sq.x, y: deployed ? c.y : sq.y, heading: c ? c.heading : sq.heading, side: sq.weaponSide || G.players[sq.owner].side });
@@ -636,10 +637,10 @@ const SIM = (() => {
     sq.order = { type: 'idle' }; sq.path = null;
     if (d.kind === 'weapon') {
       // the man nearest the weapon drops his rifle for it (never the leader, never a man already carrying a special weapon)
-      const cands = al.filter((m, i) => m !== sq.models[0] && !DROPS.weapons[m.weapon] && !(m.weapon && D.W[m.weapon].kind === 'flame'));
+      const cands = al.filter((m, i) => m !== sq.models[0] && !dropSprite(m.weapon) && !(m.weapon && D.W[m.weapon].kind === 'flame'));
       const m = (cands.length ? cands : al.slice(1)).sort((a, b) => U.dist2(a.x, a.y, d.x, d.y) - U.dist2(b.x, b.y, d.x, d.y))[0];
       if (!m) return;
-      m.weapon = d.weapon; m.sprite = DROPS.weapons[d.weapon]; m.cd = 1; sq.picked = (sq.picked || 0) + 1;
+      m.weapon = d.weapon; m.sprite = dropSprite(d.weapon); m.cd = 1; sq.picked = (sq.picked || 0) + 1;
       event(G, sq.owner, 'captured', sq.def.name + ' picked up a ' + D.W[d.weapon].name, d.x, d.y);
       return;
     }
@@ -975,7 +976,7 @@ const SIM = (() => {
   function crush(G, v) {
     for (const c of MAP.coversNear(G.map, v.x, v.y)) {
       if (!c.alive) continue;
-      const can = c.kind === 'wire' || (!v.def.light && (c.kind === 'sandbags' || c.kind === 'hedge'));
+      const can = c.kind === 'wire' || (!v.def.soft && (c.kind === 'sandbags' || c.kind === 'hedge'));
       if (!can) continue;
       if (U.segDist2(v.x, v.y, c.ax, c.ay, c.bx, c.by) < (v.def.width * .5 + .3) ** 2) MAP.removeCover(G.map, c);
     }
