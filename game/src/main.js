@@ -45,7 +45,7 @@ const MAIN = (() => {
       bar(.70, 'Loading buildings…');      // map buildings (tools/build_scenery.py); without them the drawn stand-ins show
       const scenery = await fetch(ART + 'scenery.json').then(r => r.ok ? r.json() : {}, () => ({}));
       await new Promise(res => { if (!Object.keys(scenery).length) res(); else ArtKit.load(ART, scenery, lib, () => res()); });
-      bar(.71, 'Loading ground textures…'); await RENDER.loadGround(ART + 'ground/');
+      bar(.71, 'Loading ground textures…'); await Promise.all([RENDER.loadGround(ART + 'ground/'), RENDER.loadMats(ART + 'materials/')]);
       bar(.72, 'Building the battlefield…'); await frame();
       BG = SIM.create({ seed: 7, playerSide: 'us', crewLayout: layout });
       RENDER.init($('#view'), lib, BG); resize();

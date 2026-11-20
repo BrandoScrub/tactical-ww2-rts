@@ -19,6 +19,7 @@ def main(out):
     os.makedirs(os.path.join(out, 'lib'))
     os.makedirs(os.path.join(out, 'art', 'pack'))
     shutil.copytree(os.path.join(ROOT, 'art', 'ground'), os.path.join(out, 'art', 'ground'))
+    shutil.copytree(os.path.join(ROOT, 'art', 'materials'), os.path.join(out, 'art', 'materials'))
     html = open(os.path.join(ROOT, 'game', 'index.html')).read()
     html = html.replace('../artkit/runtime/', 'lib/')
     html = html.replace('<canvas id="view"></canvas>', '<script>window.ART_BASE = "art/";</script>\n<canvas id="view"></canvas>')

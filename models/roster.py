@@ -10,7 +10,8 @@ material('us_jump', (164, 150, 108), 'canvas'); material('de_smock', (118, 104, 
 
 SIDES = ('us', 'de')
 
-from .dress import CLOTH, dress, paint, _rename
+from .dress import CLOTH, dress, paint, _rename, texture_cloth
+texture_cloth()
 
 
 # ---- vehicles
