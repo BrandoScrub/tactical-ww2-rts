@@ -24,4 +24,9 @@ The same text is in `CLAUDE.md` and `AGENTS.md`; change both together.
 - **Map buildings** (farmhouses) are `models/scenery.py`, exported by `python3 tools/build_scenery.py` into `art/scenery/` and
   `art/scenery.json` (apart from the unit art). A new house footprint in `game/src/map.js` needs a variant there and in
   `HOUSE_ART`; `node game/test/houses.js` must print `no problems`. Commit `art/scenery*` with the change.
+- **The playable game is updated after every merge.** The user plays the claude.ai artifact "Tactical WW2 RTS", not the
+  repository. After anything is merged into `main`, rebuild with `python3 tools/build_web.py dist` from the new `main`,
+  republish every file of `dist/` to that artifact (replacing its files), and load the build once to confirm the art
+  loads with no page errors. Art in a new folder under `art/` must be added to `tools/build_web.py`, or the published
+  game will not have it.
 - Before a commit: `python3 tools/check.py` prints `TOTAL 0`; `python3 tools/update_artkit.py --verify` passes.
