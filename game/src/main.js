@@ -42,7 +42,7 @@ const MAIN = (() => {
       await new Promise(res => {
         for (const k of keys) ArtKit.load(ART, { [k]: assets[k] }, lib, () => { done++; bar(.04 + .66 * done / keys.length, `Loading unit art ${done} / ${keys.length}`); if (done === keys.length) res(); });
       });
-      bar(.71, 'Loading ground textures…'); await RENDER.loadGround(ART + 'ground/');
+      bar(.71, 'Loading ground textures…'); await Promise.all([RENDER.loadGround(ART + 'ground/'), RENDER.loadMats(ART + 'materials/')]);
       bar(.72, 'Building the battlefield…'); await frame();
       BG = SIM.create({ seed: 7, playerSide: 'us', crewLayout: layout });
       RENDER.init($('#view'), lib, BG); resize();

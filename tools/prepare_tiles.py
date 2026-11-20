@@ -2,9 +2,11 @@
 
     python3 tools/prepare_tiles.py            # every texture in RECIPES
     python3 tools/prepare_tiles.py wall_stone # just these
+    python3 tools/prepare_tiles.py --game     # only refresh art/materials/ (the tiles the game paints itself)
 
 Writes styles/ww2/tiles/<name>.jpg (1024 px source; the art pipeline loads these as materials) and, for ground
-tiles, art/ground/<name>.jpg (512 px, what the game's map painter loads). Then prints each tile's seam score.
+tiles, art/ground/<name>.jpg (512 px, what the game's map painter loads); for GAME_TILES, art/materials/<name>.jpg
+(256 px: houses, cover and crates the game draws itself). Then prints each tile's seam score.
 
 Each recipe is a list of steps, applied in order:
   ('rows', y0, y1)   keep whole rows/courses/boards only: the band y0..y1 (centres of two joint lines), cropped
@@ -16,16 +18,20 @@ Each recipe is a list of steps, applied in order:
   ('soften', r)      Gaussian blur radius r px at 1024 (fine regular weaves shimmer when shrunk to unit size)
   ('seam', 'xy')     blend each edge band with the half-shifted tile so it wraps without a visible seam;
                      'x' only for rows/boards (keeps rows aligned); contrast-preserving
-  ('from', name, k, char)  build from another processed tile: darken by k, mix in char (charred) at that strength
+  ('from', name, k, char)  build from another processed tile: darken by k, mix in char (charred) at that strength;
+                     any further steps then apply to the result
 """
 import os, sys
 import numpy as np
 from PIL import Image, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IN, OUT, GROUND = (os.path.join(ROOT, p) for p in ('styles/ww2/incoming', 'styles/ww2/tiles', 'art/ground'))
+IN, OUT, GROUND, GAME = (os.path.join(ROOT, p) for p in ('styles/ww2/incoming', 'styles/ww2/tiles', 'art/ground', 'art/materials'))
 N = 1024
 
+# materials the game itself paints (houses, cover, crates): written to art/materials/<name>.jpg at 256 px
+GAME_TILES = {'wall_stucco', 'wall_stone', 'stone_dressed', 'roof_tile', 'charred', 'shutter', 'timber', 'sandbag',
+              'field_wall', 'hedge_foliage', 'planks', 'rubble', 'steel'}
 GROUND_TILES = {'ground_green_grass', 'field_wheat', 'ground_olive_grove', 'crater_earth'}
 
 RECIPES = {
@@ -46,6 +52,7 @@ RECIPES = {
     'rubble':        [('sat', .7), ('grey', .1), ('gain', .97), ('seam', 'xy')],   # was the colour of ground_dirt
     'charred':       [('seam', 'xy')],
     'timber_charred': [('from', 'timber', .45, .35)],
+    'wood':          [('from', 'timber', 1.0, 0), ('mean', (112, 74, 44))],   # unit woodwork (gun trails, stowage, truck beds)
     # cover and props
     'sandbag':       [('sat', .8), ('soften', .9), ('seam', 'xy')],
     'field_wall':    [('sat', .75), ('grey', .12), ('gaps', .3), ('seam', 'xy')],
@@ -110,9 +117,11 @@ def process(name, done):
     if steps and steps[0][0] == 'from':
         _, src, k, char = steps[0]
         a = done[src] * k * (1 - char) + done['charred'] * char
-        return np.clip(a, 0, 255)
-    im = Image.open(os.path.join(IN, name + '.png' if os.path.exists(os.path.join(IN, name + '.png')) else name + '.jpg')).convert('RGB')
-    a = np.asarray(im, float)
+        if len(steps) == 1: return np.clip(a, 0, 255)
+        steps = steps[1:]                                            # further steps apply to the derived tile
+    else:
+        im = Image.open(os.path.join(IN, name + '.png' if os.path.exists(os.path.join(IN, name + '.png')) else name + '.jpg')).convert('RGB')
+        a = np.asarray(im, float)
     for st in steps:
         op = st[0]
         if op == 'rows':
@@ -147,7 +156,15 @@ def seam_score(a):
     return np.abs(L[:, 0] - L[:, -1]).mean() / inner, np.abs(L[0] - L[-1]).mean() / inner
 
 
+def game_copy(n):
+    os.makedirs(GAME, exist_ok=True)
+    Image.open(os.path.join(OUT, n + '.jpg')).resize((256, 256), Image.LANCZOS).save(os.path.join(GAME, n + '.jpg'), quality=88)
+
+
 def main(names):
+    if names == ['--game']:                       # just refresh art/materials/ from the finished tiles
+        for n in sorted(GAME_TILES): game_copy(n)
+        return print(f'{len(GAME_TILES)} game materials written to art/materials/')
     names = names or list(RECIPES)
     done = {}
     order = sorted(names, key=lambda n: RECIPES[n][:1] == [] or RECIPES[n][0][0] == 'from')
@@ -159,6 +176,7 @@ def main(names):
         im = Image.fromarray(a.astype(np.uint8))
         im.save(os.path.join(OUT, n + '.jpg'), quality=92)
         if n in GROUND_TILES: im.resize((512, 512), Image.LANCZOS).save(os.path.join(GROUND, n + '.jpg'), quality=88)
+        if n in GAME_TILES: game_copy(n)
         sx, sy = seam_score(a)
         print(f'{n:16s} mean {[int(v) for v in a.mean((0, 1))]}  seam x{sx:.2f} y{sy:.2f}' + ('  ground' if n in GROUND_TILES else ''))
 

@@ -38,6 +38,43 @@ const RENDER = (() => {
       const im = new Image(); im.onload = () => { R.tiles[n] = im; res(); }; im.onerror = () => res(); im.src = base + n + '.jpg';
     })));
   }
+  /* Painted materials the game draws with itself (art/materials/*.jpg, 256 px, sources in styles/ww2/tiles/): house
+     walls and roofs, shutters, doors, sandbags, field walls, hedges, crates, rubble. Each covers MAT_M metres. Missing
+     ones fall back to the flat colours, so nothing depends on them. */
+  const MATS = ['wall_stucco', 'wall_stone', 'stone_dressed', 'roof_tile', 'charred', 'shutter', 'timber', 'sandbag',
+    'field_wall', 'hedge_foliage', 'planks', 'rubble', 'steel'];
+  const MAT_M = { _: 3, shutter: 1, timber: 1.5, sandbag: 1, planks: 1.6, steel: 1, hedge_foliage: 2.5, rubble: 3 };
+  R.mats = {};
+  function loadMats(base) {
+    return Promise.all(MATS.map(n => new Promise(res => {
+      const im = new Image(); im.onload = () => { R.mats[n] = im; res(); }; im.onerror = () => res(); im.src = base + n + '.jpg';
+    })));
+  }
+  /* fill the current path of g (a 2D context) with material n at ppm px a metre; false if the material is missing */
+  function matFill(g, n, ppm, ox = 0, oy = 0) {
+    const im = R.mats[n]; if (!im) return false;
+    const px = Math.max(4, Math.round((MAT_M[n] || MAT_M._) * ppm)), key = n + '@' + px;
+    R.matTiles = R.matTiles || {};
+    let t = R.matTiles[key];
+    if (!t) { t = R.matTiles[key] = canvas(px, px); const tg = t.getContext('2d'); tg.imageSmoothingQuality = 'high'; tg.drawImage(im, 0, 0, px, px); }
+    g.save(); g.translate(ox, oy); g.fillStyle = g.createPattern(t, 'repeat'); g.fill(); g.restore();   // the path keeps its place, the pattern shifts
+    return true;
+  }
+  /* A face atlas: flat faces (walls, roof slopes, gables) painted once in face space at FPM px a metre, packed in one
+     canvas, then each drawn through the affine map face -> screen. One texture per house, so the WebGL batcher
+     takes it as a single image; bump atlas._gv after repainting. */
+  const FPM = 32;
+  function atlas(faces) {            // faces: [{w, h}] in metres -> {c, r: [{x, y, w, h}]}
+    let y = 2, W = 4; const r = faces.map(f => { const w = Math.ceil(f.w * FPM), h = Math.ceil(f.h * FPM), o = { x: 2, y, w, h }; y += h + 4; W = Math.max(W, w + 4); return o; });
+    return { c: canvas(W, y), r };
+  }
+  /* draw atlas rect rc onto the main context: face origin O (world x, y, z), u and v unit world directions */
+  function drawFace(c, A, rc, O, u, v) {
+    const [ox, oy] = toScreen(...O), [ux, uy] = toScreen(O[0] + u[0], O[1] + u[1], O[2] + u[2]), [vx, vy] = toScreen(O[0] + v[0], O[1] + v[1], O[2] + v[2]);
+    c.setTransform((ux - ox) / FPM, (uy - oy) / FPM, (vx - ox) / FPM, (vy - oy) / FPM, ox, oy);
+    c.drawImage(A.c, rc.x + .5, rc.y + .5, rc.w - 1, rc.h - 1, .5, .5, rc.w - 1, rc.h - 1);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+  }
   /* Relief shading baked over the ground texture, in the manner of a painted map: slopes turned from the light (upper
      left) take a soft shadow, slopes toward it and the tops a little warm light. Gentle on purpose so it sits with the
      painted ground; the H view shows exact heights. */
@@ -209,8 +246,44 @@ const RENDER = (() => {
     }
     return R.sprites[key] = { c, ax: 75, ay: 134 };
   }
+  /* cover and crate sprites: painted from the materials (sandbag, field_wall, hedge_foliage, planks, rubble) when they
+     loaded, else the flat stand-ins. Drawn at twice the size they are shown at, so they stay crisp zoomed in. */
   function propSprites() {
     if (R.sprites.bag) return;
+    propSpritesFlat();
+    if (!R.mats.sandbag) return;
+    const ell = (g, x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, U.TAU); };
+    const lit = (g, w, h, top, bot) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, `rgba(255,240,210,${top})`); gr.addColorStop(.45, 'rgba(0,0,0,0)'); gr.addColorStop(1, `rgba(20,14,8,${bot})`); g.globalCompositeOperation = 'source-atop'; g.fillStyle = gr; g.fillRect(0, 0, w, h); g.globalCompositeOperation = 'source-over'; };
+    // sandbag: a stuffed hessian sack, tied ends, seam down the middle
+    const bag = canvas(48, 28), g = bag.getContext('2d');
+    ell(g, 24, 14, 22, 12); matFill(g, 'sandbag', 40); lit(g, 48, 28, .28, .45);
+    g.strokeStyle = 'rgba(55,42,24,.7)'; g.lineWidth = 1.5; ell(g, 24, 14, 22, 12); g.stroke();
+    g.strokeStyle = 'rgba(55,42,24,.35)'; g.beginPath(); g.moveTo(5, 13); g.quadraticCurveTo(24, 17, 43, 13); g.stroke();
+    R.sprites.bag = bag;
+    // field wall: dry-laid stone, a row of blocks with a top course
+    const stone = canvas(48, 32), s2 = stone.getContext('2d');
+    s2.beginPath(); s2.moveTo(2, 6); s2.lineTo(10, 2); s2.lineTo(38, 2); s2.lineTo(46, 6); s2.lineTo(46, 30); s2.lineTo(2, 30); s2.closePath(); matFill(s2, 'field_wall', 60); lit(s2, 48, 32, .25, .5);
+    s2.fillStyle = 'rgba(20,14,8,.18)'; s2.fillRect(2, 20, 44, 10); s2.strokeStyle = 'rgba(45,38,28,.55)'; s2.lineWidth = 1.2; s2.stroke();
+    R.sprites.stone = stone;
+    // rubble: broken masonry and plaster in a heap
+    const rub = canvas(48, 32), rg = rub.getContext('2d'), rr2 = U.rng(21);
+    rg.beginPath(); rg.moveTo(1, 30); for (let i = 0; i <= 8; i++) rg.lineTo(2 + i * 5.5, 30 - Math.sin(i / 8 * Math.PI) * (16 + rr2() * 8)); rg.lineTo(47, 30); rg.closePath(); matFill(rg, 'rubble', 70); lit(rg, 48, 32, .2, .5);
+    for (let i = 0; i < 5; i++) { rg.beginPath(); rg.rect(6 + rr2() * 34, 10 + rr2() * 14, 5 + rr2() * 5, 3 + rr2() * 3); matFill(rg, 'stone_dressed', 60); rg.strokeStyle = 'rgba(40,32,24,.5)'; rg.stroke(); }
+    R.sprites.rubble = rub;
+    // hedge: clumps of foliage, sun on top, dark underneath
+    const hedge = canvas(60, 52), hg = hedge.getContext('2d'), rh = U.rng(9);
+    hg.beginPath(); for (let i = 0; i < 16; i++) { const x = 12 + rh() * 36, y = 16 + rh() * 24; hg.moveTo(x + 12, y); hg.ellipse(x, y, 12, 10, 0, 0, U.TAU); }
+    matFill(hg, 'hedge_foliage', 50); lit(hg, 60, 52, .22, .55);
+    hg.globalCompositeOperation = 'source-atop'; for (let i = 0; i < 10; i++) { hg.fillStyle = `rgba(${rh() < .5 ? '255,240,180,.10' : '10,14,4,.22'})`; ell(hg, 10 + rh() * 40, 12 + rh() * 28, 6, 5); hg.fill(); } hg.globalCompositeOperation = 'source-over';
+    R.sprites.hedge = hedge;
+    // ammunition / fuel crate: planks, darker side, rope handle
+    const crate = canvas(48, 44), cg = crate.getContext('2d');
+    cg.beginPath(); cg.rect(4, 12, 40, 28); matFill(cg, 'planks', 36); cg.fillStyle = 'rgba(20,14,8,.25)'; cg.fill();
+    cg.beginPath(); cg.rect(4, 4, 40, 12); matFill(cg, 'planks', 36, 7, 3); cg.fillStyle = 'rgba(255,240,210,.12)'; cg.fill();
+    cg.strokeStyle = 'rgba(40,28,14,.75)'; cg.lineWidth = 2; cg.strokeRect(4, 4, 40, 36); cg.beginPath(); cg.moveTo(4, 16); cg.lineTo(44, 16); cg.moveTo(10, 16); cg.lineTo(10, 40); cg.moveTo(38, 16); cg.lineTo(38, 40); cg.stroke();
+    R.sprites.crate = crate;
+  }
+  function propSpritesFlat() {
     const bag = canvas(24, 14), g = bag.getContext('2d');
     const gr = g.createLinearGradient(0, 0, 0, 14); gr.addColorStop(0, '#d2c49c'); gr.addColorStop(1, '#8e8060');
     g.fillStyle = gr; g.beginPath(); g.ellipse(12, 7, 11, 6, 0, 0, U.TAU); g.fill(); g.strokeStyle = 'rgba(60,50,30,.6)'; g.lineWidth = 1; g.stroke();
@@ -440,7 +513,7 @@ const RENDER = (() => {
     f([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], left);
     if (top) f([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], top);
   }
-  function drawHouse(c, h, k) {
+  function drawHouseFlat(c, h, k) {
     const x0 = h.x - h.w / 2, x1 = h.x + h.w / 2, y0 = h.y - h.d / 2, y1 = h.y + h.d / 2, H = 4.2;
     const wall = h.wall === 'stone' ? ['#a89c84', '#8d8270'] : ['#d9c9a4', '#b9a884'];
     const [sx, sy] = toScreen(h.x, h.y); c.fillStyle = 'rgba(20,18,10,.3)'; c.beginPath(); c.ellipse(sx + 18 * k, sy + 8 * k, (h.w + h.d) * 17 * k, (h.w + h.d) * 7 * k, 0, 0, U.TAU); c.fill();
@@ -467,6 +540,121 @@ const RENDER = (() => {
       poly([[x0 - .3, y1 + .3, H], [x1 + .3, y1 + .3, H], [h.x, y1 + .3, ridge]], wall[1]);
       poly([[h.x, y0 - .3, ridge], [h.x, y1 + .3, ridge], [x1 + .3, y1 + .3, H], [x1 + .3, y0 - .3, H]], roof[2]);
       poly([[x0 - .3, y0 - .3, H], [h.x, y0 - .3, ridge], [h.x, y1 + .3, ridge], [x0 - .3, y1 + .3, H]], roof[0]);
+    }
+  }
+  /* ---- farmhouses, painted: stucco or stone walls with dressed quoins or a plinth, shuttered windows, a plank door,
+     terracotta or slate roofs; scorching and roof holes as the house is ground down. Each house is painted once into
+     its own face atlas (repainted when its damage stage changes) and drawn as flat faces through the iso map. */
+  const HOUSE_H = 4.2, RIDGE = 2.2;
+  function houseFaces(h) {
+    const along = h.w >= h.d, L = along ? h.w : h.d, D = along ? h.d : h.w, sl = Math.hypot(D / 2 + .3, RIDGE);
+    return { along, L, D, sl, faces: [{ w: h.d, h: HOUSE_H }, { w: h.w, h: HOUSE_H }, { w: D + .6, h: RIDGE }, { w: L + .6, h: sl }, { w: L + .6, h: sl }] };
+  }
+  function houseStage(h) { const hf = h.hp / h.maxHp; return hf >= .6 ? 0 : Math.min(7, 1 + Math.floor((.6 - hf) * 12)); }
+  function paintHouse(h, art) {
+    const F = art.F, A = art.A, g = A.c.getContext('2d'), M = FPM, r = U.rng(h.id * 31 + 7), hf = h.hp / h.maxHp;
+    const stone = h.wall === 'stone', wallMat = stone ? 'wall_stone' : 'wall_stucco';
+    const shutterTint = ['#6f7d5c', '#7d6650', '#8c8a78', '#5f6f6a'][h.id % 4];
+    g.clearRect(0, 0, A.c.width, A.c.height);
+    const scorch = (rc, amt, n) => {                 // charred blotches over a face
+      if (amt <= 0 || !R.mats.charred) return;
+      const t = canvas(rc.w, rc.h), tg = t.getContext('2d');
+      for (let i = 0; i < n; i++) {
+        const x = r() * rc.w, y = rc.h * (.2 + r() * .9), rr = (1.2 + r() * 2.2) * M, gr = tg.createRadialGradient(x, y, 0, x, y, rr);
+        gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(.55, 'rgba(0,0,0,.7)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); tg.fillStyle = gr; tg.fillRect(0, 0, rc.w, rc.h);
+      }
+      tg.globalCompositeOperation = 'source-in'; tg.beginPath(); tg.rect(0, 0, rc.w, rc.h); matFill(tg, 'charred', M);
+      g.globalAlpha = Math.min(.9, amt); g.drawImage(t, rc.x, rc.y); g.globalAlpha = 1;
+    };
+    const rect = (x, y, w, hh) => { g.beginPath(); g.rect(x, y, w, hh); };
+    // one wall face: Lu metres long, windows every 2.6 m on the upper floor, a door on the long front
+    const wall = (rc, Lu, shade, door) => {
+      g.save(); g.translate(rc.x, rc.y); rect(0, 0, rc.w, rc.h); g.clip();
+      g.beginPath(); g.rect(0, 0, rc.w, rc.h); if (!matFill(g, wallMat, M)) { g.fillStyle = stone ? '#a89c84' : '#d9c9a4'; g.fill(); }
+      // stucco: a dressed-stone plinth; stone: dressed quoins up both corners
+      if (stone) for (let z = 0, i = 0; z < HOUSE_H; z += .42, i++) for (const x0 of [0, Lu - (i % 2 ? .45 : .7)]) { rect(x0 * M, (HOUSE_H - z - .42) * M, (i % 2 ? .45 : .7) * M, .42 * M); matFill(g, 'stone_dressed', M, 0, (i % 3) * 7); g.strokeStyle = 'rgba(60,50,38,.35)'; g.lineWidth = 1; g.stroke(); }
+      else { rect(0, (HOUSE_H - .45) * M, Lu * M, .45 * M); matFill(g, 'stone_dressed', M); g.fillStyle = 'rgba(40,32,22,.25)'; g.fillRect(0, (HOUSE_H - .47) * M, Lu * M, 2); }
+      // windows: dark opening, stone sill, a shutter each side
+      for (let u = 1.6; u < Lu - .8; u += 2.6) {
+        const x = (u - .5) * M, y = (HOUSE_H - 3.3) * M, w = M, hh = 1.1 * M;
+        g.fillStyle = hf < .6 ? '#1c1712' : '#2e281f'; g.fillRect(x, y, w, hh);
+        g.fillStyle = 'rgba(150,140,120,.35)'; g.fillRect(x + w / 2 - 1, y, 2, hh); g.fillRect(x, y + hh * .45, w, 2);
+        rect(x - 3, y + hh, w + 6, .14 * M); matFill(g, 'stone_dressed', M);
+        for (const sx of [x - .5 * M, x + w]) {
+          if (hf < .3 && r() < .5) continue;               // blown off
+          rect(sx, y, .5 * M, hh); if (matFill(g, 'shutter', M)) { g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = shutterTint; g.fill(); g.restore(); } else { g.fillStyle = shutterTint; g.fill(); }
+          g.strokeStyle = 'rgba(30,26,20,.5)'; g.lineWidth = 1; g.strokeRect(sx + .5, y + .5, .5 * M - 1, hh - 1);
+        }
+      }
+      if (door) {
+        const x = (Lu / 2 - .6) * M, y = (HOUSE_H - 2.1) * M;
+        g.fillStyle = 'rgba(60,50,38,.6)'; g.fillRect(x - 3, y - 3, 1.2 * M + 6, 2.1 * M + 3);
+        rect(x, y, 1.2 * M, 2.1 * M); if (!matFill(g, 'timber', M)) { g.fillStyle = '#5a4430'; g.fill(); }
+        g.fillStyle = 'rgba(20,16,10,.5)'; g.fillRect(x + .6 * M - 1, y, 2, 2.1 * M);
+      }
+      // light: shade the face turned from the sun, darken under the eaves and at the foot
+      if (shade) { g.fillStyle = `rgba(20,16,10,${shade})`; g.fillRect(0, 0, rc.w, rc.h); }
+      let gr = g.createLinearGradient(0, 0, 0, .6 * M); gr.addColorStop(0, 'rgba(20,14,8,.35)'); gr.addColorStop(1, 'rgba(20,14,8,0)'); g.fillStyle = gr; g.fillRect(0, 0, rc.w, .6 * M);
+      gr = g.createLinearGradient(0, rc.h - .7 * M, 0, rc.h); gr.addColorStop(0, 'rgba(30,24,14,0)'); gr.addColorStop(1, 'rgba(30,24,14,.3)'); g.fillStyle = gr; g.fillRect(0, rc.h - .7 * M, rc.w, .7 * M);
+      g.restore();
+      scorch(rc, (.6 - hf) * 2.8, 3 + Math.round(Lu / 3));
+    };
+    wall(A.r[0], h.d, 0, !F.along);
+    wall(A.r[1], h.w, .2, F.along);
+    // gable: the wall material in a triangle
+    { const rc = A.r[2], W = rc.w, Hh = rc.h; g.save(); g.translate(rc.x, rc.y); g.beginPath(); g.moveTo(0, Hh); g.lineTo(W, Hh); g.lineTo(W / 2, 0); g.closePath();
+      if (!matFill(g, wallMat, M)) { g.fillStyle = stone ? '#a89c84' : '#d9c9a4'; g.fill(); }
+      g.fillStyle = `rgba(20,16,10,${F.along ? 0 : .2})`; g.fill();
+      g.globalCompositeOperation = 'source-atop'; const gr = g.createLinearGradient(0, Hh - .5 * M, 0, Hh); gr.addColorStop(0, 'rgba(20,14,8,0)'); gr.addColorStop(1, 'rgba(20,14,8,.3)'); g.fillStyle = gr; g.fillRect(0, 0, W, Hh);
+      g.restore(); }
+    // roof slopes: terracotta (or slate) courses along the ridge, a ridge cap, a dark eave line
+    const roof = (rc, shade) => {
+      g.save(); g.translate(rc.x, rc.y); rect(0, 0, rc.w, rc.h); g.clip();
+      g.beginPath(); g.rect(0, 0, rc.w, rc.h);
+      if (matFill(g, 'roof_tile', M)) { if (h.roof === 'slate') { g.globalCompositeOperation = 'saturation'; g.fillStyle = '#808080'; g.fill(); g.globalCompositeOperation = 'multiply'; g.fillStyle = '#8e8e96'; g.fill(); g.globalCompositeOperation = 'source-over'; } }
+      else { g.fillStyle = h.roof === 'slate' ? '#6f6a66' : '#b5643c'; g.fill(); }
+      g.fillStyle = 'rgba(70,40,24,.55)'; g.fillRect(0, 0, rc.w, .22 * M); g.fillStyle = 'rgba(255,230,200,.12)'; g.fillRect(0, .22 * M, rc.w, 2);
+      g.fillStyle = 'rgba(20,12,6,.55)'; g.fillRect(0, rc.h - 3, rc.w, 3);
+      if (shade) { g.fillStyle = `rgba(20,14,8,${shade})`; g.fillRect(0, 0, rc.w, rc.h); }
+      if (hf < .3) {                                       // holes: the rafters show through
+        for (let i = 0, n = 1 + Math.floor((.3 - hf) * 10); i < n; i++) {
+          const cx = (.15 + r() * .7) * rc.w, cy = (.25 + r() * .55) * rc.h, rx = (.9 + r() * 1.1) * M, ry = (.6 + r() * .8) * M;
+          g.beginPath(); for (let j = 0; j < 9; j++) { const a = j / 9 * U.TAU, q = .7 + r() * .45; g.lineTo(cx + Math.cos(a) * rx * q, cy + Math.sin(a) * ry * q); } g.closePath();
+          g.fillStyle = '#16110c'; g.fill(); g.save(); g.clip();
+          for (let x = cx - rx; x < cx + rx; x += .6 * M) { g.beginPath(); g.rect(x, 0, .14 * M, rc.h); if (!matFill(g, 'timber', M)) { g.fillStyle = '#4a3828'; g.fill(); } }
+          g.restore();
+        }
+      }
+      g.restore();
+      scorch(rc, hf < .6 ? (.6 - hf) * 1.4 : 0, 3);
+    };
+    roof(A.r[3], F.along ? .14 : 0);
+    roof(A.r[4], F.along ? 0 : .14);
+    A.c._gv = (A.c._gv | 0) + 1;
+  }
+  function houseArt(h) {
+    const st = houseStage(h); let art = R.mem.get(h);
+    if (!art || !art.A) { const F = houseFaces(h); art = { F, A: atlas(F.faces), st: -1 }; R.mem.set(h, art); }
+    if (art.st !== st) { art.st = st; paintHouse(h, art); }
+    return art;
+  }
+  function drawHouse(c, h, k) {
+    if (!R.mats.wall_stucco || !R.mats.roof_tile) return drawHouseFlat(c, h, k);
+    const x0 = h.x - h.w / 2, x1 = h.x + h.w / 2, y0 = h.y - h.d / 2, y1 = h.y + h.d / 2, H = HOUSE_H, ridge = H + RIDGE;
+    const [sx, sy] = toScreen(h.x, h.y); c.fillStyle = 'rgba(20,18,10,.3)'; c.beginPath(); c.ellipse(sx + 18 * k, sy + 8 * k, (h.w + h.d) * 17 * k, (h.w + h.d) * 7 * k, 0, 0, U.TAU); c.fill();
+    const { F, A } = houseArt(h), down = [0, 0, -1], s = F.sl, rz = -RIDGE / s;
+    drawFace(c, A, A.r[0], [x1, y0, H], [0, 1, 0], down);
+    drawFace(c, A, A.r[1], [x0, y1, H], [1, 0, 0], down);
+    if (F.along) {
+      const dy = (h.d / 2 + .3) / s;
+      drawFace(c, A, A.r[2], [x1 + .3, y0 - .3, ridge], [0, 1, 0], down);
+      drawFace(c, A, A.r[3], [x0 - .3, h.y, ridge], [1, 0, 0], [0, dy, rz]);
+      drawFace(c, A, A.r[4], [x0 - .3, h.y, ridge], [1, 0, 0], [0, -dy, rz]);
+    } else {
+      const dx = (h.w / 2 + .3) / s;
+      drawFace(c, A, A.r[2], [x0 - .3, y1 + .3, ridge], [1, 0, 0], down);
+      drawFace(c, A, A.r[4], [h.x, y0 - .3, ridge], [0, 1, 0], [dx, 0, rz]);
+      drawFace(c, A, A.r[3], [h.x, y0 - .3, ridge], [0, 1, 0], [-dx, 0, rz]);
     }
     // occupied: the occupier's flag on the ridge (enemy flags only once the house has been seen)
     if (h.occ != null && R.G) {
@@ -506,13 +694,34 @@ const RENDER = (() => {
       for (let i = 0; i <= n; i += 3) { const t = i / n, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t), [tx, ty] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t, 1); c.strokeStyle = '#5a4a32'; c.lineWidth = 2 * k; c.beginPath(); c.moveTo(sx, sy); c.lineTo(tx, ty); c.stroke(); }
     } else if (cv.kind === 'rubble') {
       const n = Math.max(1, Math.round(L / .7)), r = U.rng(cv.id * 7 + 3);
-      for (let i = 0; i <= n; i++) { const t = i / n, j = r() - .5, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t + j * .5, cv.ay + (cv.by - cv.ay) * t - j * .5, r() * .5); const s2 = k * (.7 + r() * .5); c.globalAlpha = .9; c.drawImage(R.sprites.stone, sx - 12 * s2, sy - 9 * s2, 24 * s2, 16 * s2); }
+      for (let i = 0; i <= n; i++) { const t = i / n, j = r() - .5, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t + j * .5, cv.ay + (cv.by - cv.ay) * t - j * .5, r() * .5); const s2 = k * (.7 + r() * .5); c.globalAlpha = .9; c.drawImage(R.sprites.rubble || R.sprites.stone, sx - 12 * s2, sy - 9 * s2, 24 * s2, 16 * s2); }
       c.globalAlpha = 1;
     } else if (cv.kind === 'wreck') { /* drawn with its wreck */ }
     if (a < 1) c.globalAlpha = 1;
   }
 
   /* ---------------- player buildings: stand-ins until the buildings are modelled ---------------- */
+  /* player buildings' walls, painted: plank huts tinted to the side's colour; the HQ faced with field stone */
+  function buildingWalls(c, b, side, x0, y0, x1, y1, H, wallCol) {
+    if (!R.mats.planks) return false;
+    let art = R.mem.get(b);
+    const key = side + ':' + b.w + ':' + b.d + ':' + H;
+    if (!art || art.key !== key) {
+      const A = atlas([{ w: b.d, h: H }, { w: b.w, h: H }]), g = A.c.getContext('2d'), mat = b.def.retreat ? 'field_wall' : 'planks';
+      [[A.r[0], wallCol[1], 0], [A.r[1], wallCol[0], .18]].forEach(([rc, col, shade]) => {
+        g.save(); g.translate(rc.x, rc.y); g.beginPath(); g.rect(0, 0, rc.w, rc.h); matFill(g, mat, FPM);
+        g.globalCompositeOperation = 'multiply'; g.fillStyle = col; g.fill(); g.globalCompositeOperation = 'source-over';
+        g.globalAlpha = .55; g.fillStyle = col; g.fill(); g.globalAlpha = 1;          // keep the side colour readable
+        if (shade) { g.fillStyle = `rgba(20,16,10,${shade})`; g.fill(); }
+        const gr = g.createLinearGradient(0, rc.h - .6 * FPM, 0, rc.h); gr.addColorStop(0, 'rgba(20,14,8,0)'); gr.addColorStop(1, 'rgba(20,14,8,.3)'); g.fillStyle = gr; g.fillRect(0, 0, rc.w, rc.h);
+        g.restore();
+      });
+      A.c._gv = 1; art = { key, A }; R.mem.set(b, art);
+    }
+    drawFace(c, art.A, art.A.r[0], [x1, y0, H], [0, 1, 0], [0, 0, -1]);
+    drawFace(c, art.A, art.A.r[1], [x0, y1, H], [1, 0, 0], [0, 0, -1]);
+    return true;
+  }
   function drawBuilding(G, c, b, k, ui) {
     const x0 = b.x - b.w / 2, x1 = b.x + b.w / 2, y0 = b.y - b.d / 2, y1 = b.y + b.d / 2, side = G.players[b.owner].side;
     const H = (b.def.retreat ? 3.2 : 4.6) * Math.max(.08, b.built);
@@ -529,7 +738,7 @@ const RENDER = (() => {
     const wall = side === 'us' ? ['#7c7a5e', '#94916f'] : ['#77705f', '#90897a'];
     if (b.def.retreat) {
       // HQ: dug-in command post, low and armoured, sandbags and a radio mast (reference board 08, item 9)
-      box(c, x0, y0, x1, y1, 0, H, side === 'us' ? '#6a6c52' : '#5f5a4a', wall[0], wall[1]);
+      box(c, x0, y0, x1, y1, 0, H, side === 'us' ? '#6a6c52' : '#5f5a4a', wall[0], wall[1]); buildingWalls(c, b, side, x0, y0, x1, y1, H, wall);
       box(c, b.x - 2.5, b.y - 2, b.x + 1.5, b.y + 2, H, H + .9, side === 'us' ? '#58593f' : '#4f4b3c', wall[0], wall[1]);
       for (let x = x0 + .6; x <= x1; x += .65) { const [px, py] = toScreen(x, y1 + .5, .25); c.drawImage(R.sprites.bag, px - 10 * k, py - 7 * k, 20 * k, 12 * k); }
       for (let y = y0 + .6; y <= y1; y += .65) { const [px, py] = toScreen(x1 + .5, y, .25); c.drawImage(R.sprites.bag, px - 10 * k, py - 7 * k, 20 * k, 12 * k); }
@@ -537,7 +746,7 @@ const RENDER = (() => {
       c.strokeStyle = '#333'; c.lineWidth = 2 * k; c.beginPath(); c.moveTo(m0x, m0y); c.lineTo(m1x, m1y); c.stroke();
       c.fillStyle = '#555'; c.beginPath(); c.ellipse(m1x, m1y + 6 * k, 9 * k, 5 * k, -.4, 0, U.TAU); c.fill();
     } else {
-      box(c, x0, y0, x1, y1, 0, H, null, wall[0], wall[1]);
+      if (!buildingWalls(c, b, side, x0, y0, x1, y1, H, wall)) box(c, x0, y0, x1, y1, 0, H, null, wall[0], wall[1]);
       const roof = side === 'us' ? ['#58603e', '#6b7449'] : ['#5b5145', '#6e6253'];
       // corrugated barrel roof
       const n = 8;
@@ -904,5 +1113,5 @@ const RENDER = (() => {
   }
   const isGL = () => !!(R.ctx && R.ctx.endFrame);
 
-  return Object.assign(R, { loadGround, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  return Object.assign(R, { loadGround, loadMats, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();
