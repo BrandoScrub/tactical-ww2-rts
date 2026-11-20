@@ -105,13 +105,18 @@ const MAP = (() => {
       { x: 90, y: 116, w: 9, d: 7 }, { x: 80, y: 106, w: 6, d: 6 }, { x: 64, y: 70, w: 8, d: 6 }, { x: 128, y: 156, w: 9, d: 6 },
       { x: 30, y: 122, w: 7, d: 6 }, { x: 62, y: 152, w: 8, d: 6 }, { x: 100, y: 140, w: 6, d: 8 }, { x: 46, y: 84, w: 7, d: 7 },
     ];
-    const addHouse = h => {
+    // the farmhouse art for each footprint (tools/build_scenery.py; the long side is the ridge). '_r' is the same house
+    // turned so its ridge runs along y; square ones use it for the mirrored copy, so the two halves differ.
+    const HOUSE_ART = { '9x7': 'farmhouse_stair', '6x6': 'cottage', '8x6': 'farmhouse_long', '9x6': 'farmhouse_tower', '7x6': 'farmhouse_small', '7x7': 'farmhouse_square' };
+    const addHouse = (h, mirror) => {
       const house = { id: m.houses.length, x: h.x, y: h.y, w: h.w, d: h.d, hp: 1200, maxHp: 1200, occ: null, dead: false, roof: R.pick(['tile', 'tile', 'slate']), wall: R.pick(['stucco', 'stone', 'stucco']) };
+      const art = HOUSE_ART[Math.max(h.w, h.d) + 'x' + Math.min(h.w, h.d)];
+      if (art) house.art = art + (h.w < h.d || (h.w === h.d && mirror) ? '_r' : '');
       m.houses.push(house); m.flatPad(h.x, h.y, h.w, h.d);
       for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
         if (inside(x, y)) m.block[idx(x, y)] |= BI | BV | BL;
     };
-    for (const h of halfHouses) { addHouse(h); addHouse({ ...h, x: h.y, y: h.x, w: h.d, d: h.w }); }
+    for (const h of halfHouses) { addHouse(h); addHouse({ ...h, x: h.y, y: h.x, w: h.d, d: h.w }, true); }
 
     /* ---- cover segments ---- */
     const addCover = (kind, ax, ay, bx, by, opts = {}) => {
@@ -317,7 +322,7 @@ const MAP = (() => {
       if (x >= 0 && y >= 0 && x < m.w && y < m.h) m.block[y * m.w + x] &= ~(BI | BV | BL);
     // the walls fall into knee-high rubble: heavy cover along the old outline, passable on foot, a tank can push through
     const x0 = h.x - h.w / 2 + .4, x1 = h.x + h.w / 2 - .4, y0 = h.y - h.d / 2 + .4, y1 = h.y + h.d / 2 - .4;
-    for (const [ax, ay, bx, by] of [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]]) m.addCover('rubble', ax, ay, bx, by, { cover: 'heavy', hp: 500 });
+    for (const [ax, ay, bx, by] of [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]]) m.addCover('rubble', ax, ay, bx, by, { cover: 'heavy', hp: 500 }).house = h.id;
     m.navDirty = true; m.version++;
   }
 
