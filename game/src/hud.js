@@ -148,11 +148,12 @@ const HUD = (() => {
         out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };
       });
       out[7] = { img: ico('rally'), label: 'Set rally point', tip: '<b>Set rally point</b><div>New units walk here after they are produced.</div>', act: () => { ui.mode = { type: 'rally', id: e.id }; } };
-      // Wehrmacht: the HQ card holds one place-building button per tier (reference board 08, item 6)
-      if (e.def.retreat && P.side === 'de') P.F.buildings.forEach((bid, i) => {
+      // the HQ card holds one place-building button per tier (reference board 08, item 6): both armies order their base
+      // buildings here and they raise themselves (CoH3); engineers and pioneers don't build them
+      if (e.def.retreat) P.F.buildings.forEach((bid, i) => {
         const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
         if (why === 'Already built') return;
-        out[8 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div><div class="note">Placed here, raised by Pioneers.</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, null) };
+        out[8 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div><div class="note">Ordered from the HQ; it builds itself.</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, e.id) };
       });
       return out;
     }
@@ -161,11 +162,6 @@ const HUD = (() => {
       defs.forEach((d, i) => { const def = D.DEFENCES[d]; out[i] = { img: ico(d), label: def.name, tip: `<b>${def.name}</b><div>Free: ${def.time}s a section. Drag to lay a line.</div><div>${def.cover ? def.cover[0].toUpperCase() + def.cover.slice(1) + ' cover. ' : ''}${def.blocksInfantry ? 'Stops infantry; vehicles crush it. ' : ''}${def.blocksVehicles ? 'Stops vehicles; heavy tanks break it. ' : ''}</div>`, act: () => { ui.mode = { type: 'line', what: d, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; } }; });
       { const pid = P.side + '_position', def = D.DEFENCES[pid], why = !SIM.canAfford(P, def.cost) ? 'Not enough resources' : null;
         out[3] = { img: ico('position'), label: def.name, tip: `<b>${def.name}</b><div>Holds one infantry squad or a machine-gun team in heavy cover; an HMG inside fires over the front. Empty, either side can take it.</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => { ui.mode = { type: 'pit', what: pid, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap where to dig it'); } } }; }
-      if (P.side === 'us') P.F.buildings.forEach((bid, i) => {
-        const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
-        if (why === 'Already built') return;
-        out[4 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, e.id) };
-      });
       out[11] = { img: ico('back'), label: 'Back', tip: '<b>Back</b><div>Return to orders.</div>', act: () => { ui.page = 'main'; } };
       return out;
     }
@@ -189,16 +185,14 @@ const HUD = (() => {
       }
       if (e.def.builder) {
         out[10] = { img: ico('repair'), label: 'Repair', tip: '<b>Repair</b><div>Right-click a damaged vehicle or building of yours.</div>', act: () => { ui.mode = { type: 'repair', ids: sel.filter(s => s.def.builder).map(s => s.id) }; } };
-        out[11] = { img: ico('build'), label: 'Construct', tip: '<b>Construct</b><div>Field defences' + (P.side === 'us' ? ' and base buildings' : '') + '.</div>', act: () => { ui.page = 'build'; } };
+        out[11] = { img: ico('build'), label: 'Construct', tip: '<b>Construct</b><div>Field defences and fighting positions. Base buildings are ordered from the HQ.</div>', act: () => { ui.page = 'build'; } };
       }
     }
     return out;
   }
   function pressSlot(i) { const s = cardFor()[i]; if (!s || s.disabled) { if (s && s.why) flash(s.why); return; } s.act(); }
-  function startPlace(bid, builderId) {
-    let ids = builderId ? [builderId] : null;
-    if (!ids) { const bs = G.ents.filter(e => e.type === 'squad' && e.owner === 0 && !e.dead && e.def.builder); if (!bs.length) { flash('No Pioneers to build it'); return; } bs.sort((a, b) => (a.order.type === 'build') - (b.order.type === 'build')); ids = [bs[0].id]; }
-    ui.mode = { type: 'place', what: bid, ids };
+  function startPlace(bid, hqId) {
+    ui.mode = { type: 'place', what: bid, hq: hqId };
     if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap or drag to place it. Green fits, red shows why not.'); }
   }
   function slotColAct(a) {
@@ -525,9 +519,8 @@ const HUD = (() => {
       if (m.type === 'place') {
         const err = SIM.canPlace(G, 0, m.what, wx, wy) || SIM.buildReqMissing(G, 0, m.what) || (!SIM.canAfford(G.players[0], DATA.BUILDINGS[m.what].cost) ? 'Not enough resources' : null);
         if (err) { flash(err); return; }
-        const builders = m.ids.filter(id => { const b = G.byId.get(id); return b && !b.dead; });
-        if (!builders.length) { flash('No engineers left to build it'); ui.mode = null; return; }
-        issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }, e.shiftKey); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + (e.shiftKey ? ' placed (queued)' : ' placed')); return;
+        const hq = G.byId.get(m.hq) || SIM.hqOf(G, 0); if (!hq || hq.dead) { flash('No headquarters'); ui.mode = null; return; }
+        issue(G, [hq.id], { type: 'construct', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; flash(DATA.BUILDINGS[m.what].name + ' ordered: it builds itself'); return;
       }
       if (m.type === 'pit') { if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const why = SIM.canPit(G, 0, m.what, wx, wy); if (why) { flash(why); return; } issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: wx, y: wy }, e.shiftKey); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } return; }
       if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }, e.shiftKey); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
@@ -570,9 +563,9 @@ const HUD = (() => {
       issue(G, units, { type: 'attack', target: t.id }, Q); marker(wx, wy, '#ff6a5a'); return;
     }
     if (t && t.owner === 1) { issue(G, units, { type: 'attack', target: t.id }, Q); marker(wx, wy, '#ff6a5a'); return; }
-    if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
+    if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp && !(t.type === 'building' && t.built < 1)) {
       const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
-      if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); if (Q && SIM.busy(b)) issue(G, [id], { type: 'jobs', jobs: [{ kind: 'building', id: t.id }] }, true); else { b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } } else issue(G, builders, { type: 'repair', target: t.id }, Q); return; }
+      if (builders.length) { issue(G, builders, { type: 'repair', target: t.id }, Q); return; }
     }
     // right-click an abandoned gun or a dropped weapon: the nearest squad that can use it goes for it
     const dd = !dragged && !t ? dropAt(e.clientX, e.clientY) : null;
@@ -616,7 +609,7 @@ const HUD = (() => {
     const t = entAt(x, y), mine = selEnts().filter(s => s.owner === 0);
     // a point's icon with units selected: take it
     if (mine.length && mine[0].type !== 'building' && pointIconAt(x, y)) { rightUp(fake(x, y, ui.queue)); return; }
-    if (t && t.owner === 0 && !(mine.length && mine.some(s => s.def && s.def.builder) && t.type !== 'squad' && (t.hp < t.maxHp || t.built < 1) && !ui.multi)) { mouse.drag = null; leftUp(fake(x, y, ui.multi)); return; }
+    if (t && t.owner === 0 && !(mine.length && mine.some(s => s.def && s.def.builder) && t.type !== 'squad' && t.hp < t.maxHp && !(t.built < 1) && !ui.multi)) { mouse.drag = null; leftUp(fake(x, y, ui.multi)); return; }
     if (mine.length && mine[0].type !== 'building' || mine.length && mine[0].type === 'building' && !t) { rightUp(fake(x, y, ui.queue)); return; }
     mouse.drag = null; leftUp(fake(x, y));
   }

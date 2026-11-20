@@ -74,7 +74,9 @@ const houses = G => G.map.houses.filter(h => !h.pit && !h.dead);
   const p = G.map.points.sort((a, b) => Math.hypot(a.x - hq.x, a.y - hq.y) - Math.hypot(b.x - hq.x, b.y - hq.y))[3];
   const v = SIM.spawnVehicle(G, 'de_222', slot, p.x, p.y); v.hp = v.maxHp * .3;
   run(G, 3, [slot]);
-  check('AI marks the vehicle for repair', !!v.fixing);
+  check('AI keeps a vehicle at 30% in the fight', !v.fixing);
+  v.hp = v.maxHp * .2; run(G, 3, [slot]);
+  check('AI marks a vehicle under 25% for repair', !!v.fixing);
   const spot = AI.repairSpot(G, slot, v), d0 = Math.hypot(v.x - spot.x, v.y - spot.y);
   let d1 = d0; for (let i = 0; i < 60 * 20 && v.fixing; i++) { AI.step(G, slot); SIM.step(G, SIM.DT); d1 = Math.min(d1, Math.hypot(v.x - spot.x, v.y - spot.y)); }
   // it drives back toward the spot by its HQ (the engineers may meet it on the way)
@@ -123,6 +125,21 @@ const houses = G => G.map.houses.filter(h => !h.pit && !h.dead);
     }
   }
   check('AI machine guns set up in cover most of the time', mgCov / Math.max(1, mgT) >= .5, Math.round(mgCov / Math.max(1, mgT) * 100) + '% of set-up time');
+}
+/* 9. base buildings: ordered from the HQ, they raise themselves; engineers can't build them */
+{
+  const G = game(), P = G.players[0], hq = SIM.hqOf(G, 0), id = P.F.buildings[0];
+  const eng = G.ents.find(e => e.type === 'squad' && e.owner === 0 && e.def.builder);
+  P.res.mp = 2000; P.res.fu = 500;
+  let spot = null; for (let r = 18; r < 40 && !spot; r += 3) for (let a = 0; a < 24 && !spot; a++) { const x = hq.x + Math.cos(a / 24 * U.TAU) * r, y = hq.y + Math.sin(a / 24 * U.TAU) * r; if (!SIM.canPlace(G, 0, id, x, y)) spot = { x, y }; }
+  SIM.issue(G, [eng.id], { type: 'build', what: id, x: spot.x, y: spot.y });
+  check('engineers cannot build a base building', !G.ents.some(e => e.type === 'building' && e.defId === id));
+  SIM.issue(G, [hq.id], { type: 'construct', what: id, x: spot.x, y: spot.y });
+  const b = G.ents.find(e => e.type === 'building' && e.defId === id);
+  check('the HQ orders it', !!b && b.built < 1);
+  SIM.kill(G, eng);
+  run(G, DATA.BUILDINGS[id].time + 1);
+  check('it builds itself with no engineers', b.built >= 1 && P.built.has(id));
 }
 console.log(bad ? bad + ' problems' : 'orders ok');
 process.exit(bad ? 1 : 0);

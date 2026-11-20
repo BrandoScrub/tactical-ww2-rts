@@ -85,13 +85,13 @@ const AI = (() => {
     const vehOpts = PLAN[me.side].mid.concat(PLAN[me.side].late).map(([u]) => u).filter((u, i, a) => a.indexOf(u) === i && isFightingVehicle(SIM.unitDef(u)) && buildings.some(b => b.built >= 1 && b.def.produce.includes(u)));
     const vehShort = vehOpts.length > 0 && ti >= 0 && vehicles < VEH_BEFORE_TECH[ti] && G.t < [0, 0, 600, 840][ti];
     const wantTech = next && !vehShort && (army >= [0, 4, 6, 8][ti] || G.t > [0, 220, 330, 480][ti]);
-    if (wantTech && builders.length && SIM.canAfford(me, D.BUILDINGS[next].cost) && !buildings.some(b => b.built < 1)) {
+    // base buildings are ordered from the HQ and raise themselves
+    const hqB = SIM.hqOf(G, me.slot);
+    if (wantTech && hqB && SIM.canAfford(me, D.BUILDINGS[next].cost) && !buildings.some(b => b.built < 1)) {
       const spot = findSpot(G, me.slot, next);
-      if (spot) SIM.issue(G, [builders[0].id], { type: 'build', what: next, x: spot.x, y: spot.y });
+      if (spot) SIM.issue(G, [hqB.id], { type: 'construct', what: next, x: spot.x, y: spot.y });
     }
-    // help finish buildings
-    for (const b of buildings) if (b.built < 1) for (const p of builders) if (p.order.type !== 'build') { p.buildQueue = [{ kind: 'building', id: b.id }]; p.order = { type: 'build' }; }
-    // no builder left: replace one first, ahead of everything else (it can't tech without one)
+    // no builder left: replace one first, ahead of everything else (repairs and field works need one)
     const builderQueued = buildings.some(b => b.queue.some(q => SIM.unitDef(q.unit).builder));
     if (!builders.length && !builderQueued) {
       const hqB = buildings.find(b => b.built >= 1 && b.def.produce.includes(me.F.builder));
@@ -100,7 +100,7 @@ const AI = (() => {
     // keep money for tech when it is close, but only what the tech is actually waiting on: saving manpower while fuel is
     // still far short just banks it (the old rule left 200+ manpower idle and starved the army)
     let reserve = { mp: 0, fu: 0 };
-    if (wantTech && (builders.length || builderQueued)) {
+    if (wantTech) {
       const c = D.BUILDINGS[next].cost, fuShort = (c.fu || 0) - me.res.fu, fuRate = Math.max(1, me.income ? me.income.fu : 6) / 60;
       reserve = { mp: fuShort > 0 && fuShort / fuRate > 45 ? 0 : (c.mp || 0), fu: c.fu || 0 };
     }
@@ -270,10 +270,10 @@ const AI = (() => {
   }
 
   /* ---------------- vehicles: fall back to be repaired ----------------
-     Below FIX.low health (or with a critical), a vehicle breaks off, backs away from armour or guns in front of it, then
+     Below FIX.low health (or FIX.crit with an engine or gun critical), a vehicle breaks off, backs away from armour or guns in front of it, then
      drives to the repair spot behind the HQ and waits there; the nearest engineers come and fix it. It returns to the
      fight at FIX.done. An immobilised one stays and fights, and engineers go to it when the ground round it is clear. */
-  const FIX = { low: .45, crit: .8, done: .92, backOff: 14, spotSpace: 6 };
+  const FIX = { low: .25, crit: .4, done: .92, backOff: 14, spotSpace: 6 };
   function repairSpot(G, slot, v) {
     const hq = SIM.hqOf(G, slot); if (!hq) return null;
     const ax = hq.rally.x - hq.x, ay = hq.rally.y - hq.y, L = Math.hypot(ax, ay) || 1;

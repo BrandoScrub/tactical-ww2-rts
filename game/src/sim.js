@@ -353,11 +353,31 @@ const SIM = (() => {
     } else if (o.type === 'cancel') {
       const q = b.queue[o.index]; if (!q) return; pay(P, unitDef(q.unit).cost, -1); b.queue.splice(o.index, 1); popRecount(G);
     } else if (o.type === 'rally' || o.type === 'move') { b.rally = { x: o.x, y: o.y }; }
+    else if (o.type === 'construct' && b.def.retreat) constructFromHq(G, b, o);
+  }
+  /* Base buildings are ordered from the HQ (CoH3): placed, paid for, and they raise themselves over their build time.
+     Engineers and Pioneers do not build them (they build field defences and repair). */
+  function constructFromHq(G, hq, o) {
+    const P = G.players[hq.owner], def = D.BUILDINGS[o.what];
+    if (!def || def.side !== P.side || !P.F.buildings.includes(o.what)) return;
+    const why = canPlace(G, hq.owner, o.what, o.x, o.y) || buildReqMissing(G, hq.owner, o.what) || (!canAfford(P, def.cost) ? 'Not enough resources' : null);
+    if (why) { event(G, hq.owner, 'error', why, o.x, o.y); return; }
+    pay(P, def.cost);
+    const b = placeBuilding(G, o.what, hq.owner, o.x, o.y, 0); b.hp = def.hp * .1;
+    // anyone standing on the plot steps off it
+    const nav = MAP.navGrids(G.map).inf;
+    for (const e of G.ents) if (e.type === 'squad' && !e.dead && e.garrison == null) for (const m of e.models) if (m.alive && Math.abs(m.x - b.x) < b.w / 2 + .3 && Math.abs(m.y - b.y) < b.d / 2 + .3) { const q = MAP.nearestOpen(nav, G.map, m.x, m.y); m.x = q.x; m.y = q.y; m.spath = null; }
+    event(G, hq.owner, 'built', def.name + ' under construction', o.x, o.y);
   }
   function stepBuildings(G, dt) {
     for (const b of G.ents) {
       if (b.type !== 'building' || b.dead) continue;
-      if (b.built < 1) continue;
+      if (b.built < 1) {
+        // raising itself: full in its build time
+        b.built = Math.min(1, b.built + dt / b.def.time); b.hp = Math.min(b.maxHp, b.hp + b.maxHp * .9 * dt / b.def.time);
+        if (b.built >= 1) { G.players[b.owner].built.add(b.defId); event(G, b.owner, 'built', b.def.name + ' complete', b.x, b.y); }
+        continue;
+      }
       const q = b.queue[0]; if (!q) continue;
       q.t += dt;
       if (q.t >= q.total) {
@@ -384,14 +404,8 @@ const SIM = (() => {
   /* lay out (and pay for) a building, fighting position or defence line; returns the squad's jobs, or null with the reason as an alert */
   function placeBuild(G, sq, o) {
     const P = G.players[sq.owner];
-    if (D.BUILDINGS[o.what]) {
-      const why = canPlace(G, sq.owner, o.what, o.x, o.y) || buildReqMissing(G, sq.owner, o.what);
-      if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return null; }
-      const def = D.BUILDINGS[o.what]; if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return null; }
-      pay(P, def.cost);
-      const b = placeBuilding(G, o.what, sq.owner, o.x, o.y, 0); b.hp = def.hp * .1;
-      return [{ kind: 'building', id: b.id }];
-    } else if (D.DEFENCES[o.what] && D.DEFENCES[o.what].point) {
+    if (D.BUILDINGS[o.what]) { event(G, sq.owner, 'error', 'Base buildings are ordered from the HQ', o.x, o.y); return null; }
+    else if (D.DEFENCES[o.what] && D.DEFENCES[o.what].point) {
       const def = D.DEFENCES[o.what];
       const why = canPit(G, sq.owner, o.what, o.x, o.y); if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return null; }
       if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return null; }
