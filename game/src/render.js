@@ -410,8 +410,10 @@ const RENDER = (() => {
     }
     return (R.craterSpr = out);
   }
+  /* what the viewer is shown: player 0's sight, or everything when fog is off (Watch AI, the menu backdrop, Shift+F12) */
+  const seesEnt = (G, e) => R.noFog || FOG.visible(G, 0, e), seesAt = (G, x, y) => R.noFog || FOG.seen(G, 0, x, y), knows = (G, x, y) => R.noFog || FOG.explored(G, 0, x, y);
   function frame(G, ui, alpha) {
-    R.G = G;
+    R.G = G; R.noFog = !!ui.noFog;
     const c = R.ctx, k = R.cam.k, me = 0;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
@@ -439,23 +441,23 @@ const RENDER = (() => {
     // shadows of everything that moves, then all objects back to front
     const list = [];
     R.under = [];                                         // squads and vehicles shown this frame (trees over them fade)
-    for (const e of G.ents) if (!e.dead && (e.type === 'squad' || e.type === 'vehicle') && FOG.visible(G, me, e)) R.under.push(e);
+    for (const e of G.ents) if (!e.dead && (e.type === 'squad' || e.type === 'vehicle') && seesEnt(G, e)) R.under.push(e);
     for (const t of G.map.trees) if (vis(t.x, t.y, 160)) list.push({ d: t.x + t.y, f: () => drawTree(c, t, k) });
     const shadows = [];
     for (const h of G.map.houses) {
-      if (h.pit) { if (!h.dead && vis(h.x, h.y, 120) && (h.owner === me || FOG.explored(G, me, h.x, h.y))) { list.push({ d: h.x + h.y - 2.2, f: () => drawPit(G, c, h, k, false) }); list.push({ d: h.x + h.y + 1.6, f: () => drawPit(G, c, h, k, true) }); } continue; }
+      if (h.pit) { if (!h.dead && vis(h.x, h.y, 120) && (h.owner === me || knows(G, h.x, h.y))) { list.push({ d: h.x + h.y - 2.2, f: () => drawPit(G, c, h, k, false) }); list.push({ d: h.x + h.y + 1.6, f: () => drawPit(G, c, h, k, true) }); } continue; }
       if (!((!h.dead || houseArt(h)) && vis(h.x, h.y, 260))) continue;
       list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
       if (houseArt(h)) { const [nx, ny] = toScreen(h.x + h.w / 2, h.y + h.d / 2); shadows.push(() => ArtKit.drawShadow(c, R.lib, h.art, houseState(h), nx, ny, k)); }
     }
     for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) { if (!coverPieces(G, c, cv, k, list)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) }); }
     for (const w of G.wrecks || []) if (vis(w.x, w.y, 200)) list.push({ d: w.x + w.y, f: () => drawWreck(G, c, w, k) });
-    for (const d of G.drops || []) if (vis(d.x, d.y, 120) && FOG.explored(G, me, d.x, d.y)) list.push({ d: d.x + d.y, f: () => drawDrop(G, c, d, k, ui) });
-    if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
+    for (const d of G.drops || []) if (vis(d.x, d.y, 120) && knows(G, d.x, d.y)) list.push({ d: d.x + d.y, f: () => drawDrop(G, c, d, k, ui) });
+    if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && knows(G, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
     for (const e of G.ents) {
       if (e.dead) continue;
-      if (!FOG.visible(G, me, e) && !(e.type === 'building')) continue;
-      if (e.type === 'building') { if (e.owner !== me && !FOG.explored(G, me, e.x, e.y)) continue; if (vis(e.x, e.y, 300)) list.push({ d: e.x + e.y + (e.w + e.d) * .2, f: () => drawBuilding(G, c, e, k, ui) }); continue; }
+      if (!seesEnt(G, e) && !(e.type === 'building')) continue;
+      if (e.type === 'building') { if (e.owner !== me && !knows(G, e.x, e.y)) continue; if (vis(e.x, e.y, 300)) list.push({ d: e.x + e.y + (e.w + e.d) * .2, f: () => drawBuilding(G, c, e, k, ui) }); continue; }
       if (e.type === 'vehicle') { if (vis(e.x, e.y, 200)) { list.push({ d: e.x + e.y, f: () => drawVehicle(G, c, e, k) }); shadows.push(() => drawVehicleShadow(G, c, e, k)); } continue; }
       if (e.type === 'squad') {
         if (!vis(e.x, e.y, 120)) continue;
@@ -569,7 +571,7 @@ const RENDER = (() => {
     c.globalAlpha = 1;
     if (front && h.occ != null) {
       const o = G.byId.get(h.occ);
-      if (o && !o.dead && (o.owner === 0 || FOG.visible(G, 0, o))) {
+      if (o && !o.dead && (o.owner === 0 || seesEnt(G, o))) {
         const bx = h.x - Math.cos(h.face) * h.w * .42, by = h.y - Math.sin(h.face) * h.w * .42;
         const [px, py] = toScreen(bx, by, .6), [qx, qy] = toScreen(bx, by, 2.4);
         c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
@@ -586,7 +588,7 @@ const RENDER = (() => {
     // occupied: the occupier's flag on the ridge (enemy flags only once the house has been seen)
     if (h.occ == null || !R.G) return;
     const o = R.G.byId.get(h.occ);
-    if (o && !o.dead && (o.owner === 0 || FOG.visible(R.G, 0, o))) {
+    if (o && !o.dead && (o.owner === 0 || seesEnt(R.G, o))) {
       const [px, py] = toScreen(h.x, h.y, ridge), [qx, qy] = toScreen(h.x, h.y, ridge + 3.2);
       c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
       c.fillStyle = TEAM[o.owner]; c.fillRect(qx, qy, 15 * k, 10 * k);
@@ -1015,7 +1017,7 @@ const RENDER = (() => {
     for (const f of G.fx) {
       const age = G.t - f.t;
       if (f.kind === 'muzzle') {
-        if (!FOG.seen(G, 0, f.x, f.y)) continue;
+        if (!seesAt(G, f.x, f.y)) continue;
         const [sx, sy] = toScreen(f.x, f.y, f.big ? 1.6 : 1.1); c.globalCompositeOperation = 'lighter';
         c.fillStyle = `rgba(255,210,120,${.9 * (1 - age / .15)})`; c.beginPath(); c.arc(sx, sy, (f.big ? 11 : 3.5) * k, 0, U.TAU); c.fill(); c.globalCompositeOperation = 'source-over';
       } else if (f.kind === 'tracer' || f.kind === 'flame') {
@@ -1045,7 +1047,7 @@ const RENDER = (() => {
     const sel = ui.selected;
     // selection rings and order lines
     for (const e of G.ents) {
-      if (e.dead || (e.owner !== 0 && !FOG.visible(G, 0, e))) continue;
+      if (e.dead || (e.owner !== 0 && !seesEnt(G, e))) continue;
       const isSel = sel.has(e.id), hov = ui.hover === e.id;
       if (!isSel && !hov) continue;
       c.strokeStyle = e.owner === 0 ? 'rgba(90,220,255,.95)' : 'rgba(255,110,90,.95)'; c.lineWidth = 1.6 * k;
@@ -1086,8 +1088,8 @@ const RENDER = (() => {
     if (ui.ghost) drawGhost(G, c, k, ui.ghost);
     // decorators
     for (const e of G.ents) {
-      if (e.dead || e.type === 'building' && e.owner === 1 && !FOG.explored(G, 0, e.x, e.y)) continue;
-      if (e.type !== 'building' && !FOG.visible(G, 0, e)) continue;
+      if (e.dead || e.type === 'building' && e.owner === 1 && !knows(G, e.x, e.y)) continue;
+      if (e.type !== 'building' && !seesEnt(G, e)) continue;
       drawDecorator(G, c, e, k, sel.has(e.id), ui);
     }
     // point icons
