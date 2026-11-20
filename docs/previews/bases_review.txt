@@ -1,0 +1,100 @@
+us_hq (landmark): 100/100
+  ok   outline: 76% of it is one plain block (a landmark building may be 80%)
+  ok   skyline: the highest part stands 0.91 block-heights above the main mass (wants 0.55)
+  ok   roof levels: 6 (wants 3)
+  ok   value: light to dark range 0.33 (wants 0.18)
+  ok   value blocks: 94% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 1.6% (wants 1.2 to 9%)
+  ok   colour: 94% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 13 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+us_barracks (major): 100/100
+  ok   outline: 80% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 3.59 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 5 (wants 2)
+  ok   value: light to dark range 0.27 (wants 0.18)
+  ok   value blocks: 90% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 3.5% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 16 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+us_wsc (major): 100/100
+  ok   outline: 66% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 5.76 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 4 (wants 2)
+  ok   value: light to dark range 0.26 (wants 0.18)
+  ok   value blocks: 87% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 4.6% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 15 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+us_motorpool (major): 100/100
+  ok   outline: 77% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 0.62 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 4 (wants 2)
+  ok   value: light to dark range 0.43 (wants 0.18)
+  ok   value blocks: 79% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 2.0% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 21 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+us_depot (major): 100/100
+  ok   outline: 83% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 1.10 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 6 (wants 2)
+  ok   value: light to dark range 0.52 (wants 0.18)
+  ok   value blocks: 94% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 1.4% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 14 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+de_hq (landmark): 100/100
+  ok   outline: 77% of it is one plain block (a landmark building may be 80%)
+  ok   skyline: the highest part stands 1.42 block-heights above the main mass (wants 0.55)
+  ok   roof levels: 3 (wants 3)
+  ok   value: light to dark range 0.46 (wants 0.18)
+  ok   value blocks: 94% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 2.3% (wants 1.2 to 9%)
+  ok   colour: 97% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 11 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+de_infanterie (major): 100/100
+  ok   outline: 59% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 4.17 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 6 (wants 2)
+  ok   value: light to dark range 0.35 (wants 0.18)
+  ok   value blocks: 80% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 3.6% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 18 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+de_luftwaffe (major): 100/100
+  ok   outline: 66% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 2.42 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 3 (wants 2)
+  ok   value: light to dark range 0.47 (wants 0.18)
+  ok   value blocks: 84% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 3.9% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 19 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+de_pzgren (major): 100/100
+  ok   outline: 75% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 5.38 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 5 (wants 2)
+  ok   value: light to dark range 0.39 (wants 0.18)
+  ok   value blocks: 76% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 2.5% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 12 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
+de_panzer (major): 100/100
+  ok   outline: 79% of it is one plain block (a major building may be 84%)
+  ok   skyline: the highest part stands 0.50 block-heights above the main mass (wants 0.35)
+  ok   roof levels: 6 (wants 2)
+  ok   value: light to dark range 0.51 (wants 0.18)
+  ok   value blocks: 80% of the picture is in large even areas (wants 55%)
+  ok   colour: the accent covers 1.5% (wants 1.2 to 9%)
+  ok   colour: 100% of it is in its four largest pieces (wants 65%)
+  ok   detail: 0 of 14 parts are too small to see at play size
+  ok   grammar: has base, roof, signature, accent
