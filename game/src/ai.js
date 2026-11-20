@@ -184,8 +184,13 @@ const AI = (() => {
      nearer beats farther; a spot that walks the squad toward the enemy costs more. Wire gives no cover. */
   const COVER_SEEK = { behind: .85, heavyBonus: 4, advanceCost: .6, react: 10, snap: 9, cooldown: 7 };
   function coverSpot(G, x, y, face, r, fromX, fromY) {
-    const nav = MAP.navGrids(G.map).inf, fx = Math.cos(face), fy = Math.sin(face), seen = new Set();
     let best = null, bs = 1e9;
+    for (const c of coverSpots(G, x, y, face, r, fromX, fromY)) if (c.score < bs) { bs = c.score; best = c; }
+    return best;
+  }
+  /* every such spot, with its score (lower is better) */
+  function coverSpots(G, x, y, face, r, fromX, fromY) {
+    const nav = MAP.navGrids(G.map).inf, fx = Math.cos(face), fy = Math.sin(face), seen = new Set(), out = [];
     for (let gx = -1; gx <= 1; gx++) for (let gy = -1; gy <= 1; gy++) for (const c of MAP.coversNear(G.map, x + gx * 8, y + gy * 8)) {
       if (seen.has(c) || !c.alive || !c.cover || c.cover === 'negative' || c.built < 1) continue; seen.add(c);
       const L = Math.hypot(c.bx - c.ax, c.by - c.ay); if (L < .5) continue;
@@ -197,10 +202,105 @@ const AI = (() => {
         const d = Math.hypot(px - x, py - y); if (d > r || !MAP.walkable(nav, G.map, px, py)) continue;
         const adv = fromX == null ? 0 : Math.max(0, (px - fromX) * fx + (py - fromY) * fy);
         const sc = d + adv * COVER_SEEK.advanceCost - (c.cover === 'heavy' ? COVER_SEEK.heavyBonus : 0);
-        if (sc < bs) { bs = sc; best = { x: px, y: py, cover: c.cover }; }
+        out.push({ x: px, y: py, cover: c.cover, score: sc });
       }
     }
+    return out;
+  }
+
+  /* ---------------- machine guns: hold ground from cover, watching the way the enemy comes ----------------
+     CoH3 players put HMGs behind cover (or in a building) beside the points they hold, aimed down the road or gap the
+     enemy has to come through. Here: the enemy's walking route to the point (from its HQ) is sampled over its last
+     ~70 m; samples where the route is squeezed (houses, walls, hedges either side) count more, as choke points. Each
+     candidate spot near the point (behind cover across that route, a free house beside it, or open ground if nothing
+     else) scores for cover, for how much of the route it sees inside its range and arc, and for staying near the point.
+     The gun faces the middle of what it covers. */
+  const MG = { search: 16, routeLen: 70, step: 3, chokeR: 8, every: 40 };
+  function approach(G, slot, p) {
+    const S = (G.aiRoutes || (G.aiRoutes = {})), key = slot + ':' + p.id, c = S[key];
+    if (c && c.t > G.t && c.ver === G.map.version) return c.pts;
+    const foe = SIM.hqOf(G, 1 - slot); if (!foe) return [];
+    const path = MAP.findPath(G.map, foe.x, foe.y, p.x, p.y, false) || [];
+    const nav = MAP.navGrids(G.map).inf, pts = [];
+    // walk the route back from the point, a sample every MG.step metres
+    let prev = { x: p.x, y: p.y }, run = 0, carry = 0;
+    for (let i = path.length - 1; i >= -1 && run < MG.routeLen; i--) {
+      const q = i >= 0 ? path[i] : { x: foe.x, y: foe.y }, L = Math.hypot(q.x - prev.x, q.y - prev.y);
+      let t = MG.step - carry;
+      while (t <= L && run + t < MG.routeLen) {
+        const x = prev.x + (q.x - prev.x) * t / L, y = prev.y + (q.y - prev.y) * t / L;
+        // how open the ground is across the route: blocked within chokeR either side makes it a choke point
+        const ux = (q.x - prev.x) / (L || 1), uy = (q.y - prev.y) / (L || 1);
+        let open = 0;
+        for (const sd of [-1, 1]) for (let k = 1; k <= MG.chokeR; k++) { if (!MAP.walkable(nav, G.map, x - uy * k * sd, y + ux * k * sd)) break; open++; }
+        if (Math.hypot(x - p.x, y - p.y) > p.radius) pts.push({ x, y, w: 1 + Math.max(0, MG.chokeR * 2 - open) / 4 });
+        t += MG.step;
+      }
+      carry = L - (t - MG.step); run += L; prev = q;
+    }
+    S[key] = { t: G.t + MG.every, ver: G.map.version, pts };
+    return pts;
+  }
+  function mgPlan(G, me, e, p) {
+    const w = SIM.weaponOf(e); if (!w) return null;
+    const route = approach(G, me.slot, p); if (!route.length) return null;
+    const R = w.rng[2] * .9, half = (w.arc || 60) / 2 * Math.PI / 180;
+    // the way the enemy comes from: the route a little out from the point
+    const mid = route[Math.min(route.length - 1, 6)], toward = Math.atan2(mid.y - p.y, mid.x - p.x);
+    const cands = coverSpots(G, p.x, p.y, toward, p.radius + MG.search).map(c => ({ x: c.x, y: c.y, cover: c.cover, kind: 'spot' }));
+    for (const h of G.map.houses) if (!h.pit && !h.dead && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < (p.radius + MG.search) ** 2) cands.push({ x: h.x, y: h.y, cover: 'garrison', kind: 'house', h });
+    cands.push({ x: p.x - Math.cos(toward) * 6, y: p.y - Math.sin(toward) * 6, cover: 'none', kind: 'spot' });
+    const nav = MAP.navGrids(G.map).inf;
+    let best = null, bs = -1e9;
+    for (const c of cands) {
+      if (c.kind === 'spot' && !MAP.walkable(nav, G.map, c.x, c.y)) continue;
+      // a centre of the route it can see from here, then how much of it falls inside the arc round that
+      let sx = 0, sy = 0, sw = 0;
+      const seen = route.filter(q => { const d = Math.hypot(q.x - c.x, q.y - c.y); return d < R && d > 3 && MAP.los(G.map, c.x, c.y, q.x, q.y); });
+      for (const q of seen) { sx += q.x * q.w; sy += q.y * q.w; sw += q.w; }
+      if (!sw) continue;
+      const face = Math.atan2(sy / sw - c.y, sx / sw - c.x);
+      const watch = c.kind === 'house' ? sw : seen.reduce((a, q) => a + (Math.abs(U.angNorm(Math.atan2(q.y - c.y, q.x - c.x) - face)) <= half ? q.w : 0), 0);
+      const cov = c.cover === 'heavy' || c.cover === 'garrison' ? 9 : c.cover === 'light' ? 6 : 0;
+      const far = Math.max(0, Math.hypot(c.x - p.x, c.y - p.y) - p.radius - 4);
+      const score = watch * 1.4 + cov - far * .8;
+      if (score > bs) { bs = score; best = { ...c, face }; }
+    }
     return best;
+  }
+
+  /* ---------------- vehicles: fall back to be repaired ----------------
+     Below FIX.low health (or with a critical), a vehicle breaks off, backs away from armour or guns in front of it, then
+     drives to the repair spot behind the HQ and waits there; the nearest engineers come and fix it. It returns to the
+     fight at FIX.done. An immobilised one stays and fights, and engineers go to it when the ground round it is clear. */
+  const FIX = { low: .45, crit: .8, done: .92, backOff: 14, spotSpace: 6 };
+  function repairSpot(G, slot, v) {
+    const hq = SIM.hqOf(G, slot); if (!hq) return null;
+    const ax = hq.rally.x - hq.x, ay = hq.rally.y - hq.y, L = Math.hypot(ax, ay) || 1;
+    // beside the HQ, off to one side of where new units walk out, a slot per vehicle so they don't pile up
+    const k = (v.id % 3) - 1, px = -ay / L, py = ax / L;
+    const x = hq.x + ax / L * (hq.w * .5 + 6) + px * (10 + k * FIX.spotSpace), y = hq.y + ay / L * (hq.d * .5 + 6) + py * (10 + k * FIX.spotSpace);
+    return MAP.nearestOpen(MAP.navGrids(G.map).veh, G.map, x, y, MAP.mainRegion(G.map, true));
+  }
+  function vehicleFix(G, me, e, visibleEnemies) {
+    const crit = e.crit && (e.crit.engine || e.crit.gun);
+    if (!e.fixing && (e.hp < e.maxHp * FIX.low || (crit && e.hp < e.maxHp * FIX.crit))) { e.fixing = true; e.backT = 0; }
+    if (!e.fixing) return false;
+    if (e.hp >= e.maxHp * FIX.done && !e.crit) { e.fixing = false; return false; }
+    if (e.crit && e.crit.engine === 2) return true;                 // can't move: it fights where it is until repaired
+    const spot = repairSpot(G, me.slot, e); if (!spot) return false;
+    const d = Math.hypot(spot.x - e.x, spot.y - e.y);
+    if (d < 8) { if (e.order.type !== 'idle' && e.order.type !== 'attack') SIM.issue(G, [e.id], { type: 'stop' }); return true; }
+    // armour or anti-tank in front: back off first, front plate toward them
+    const threat = visibleEnemies.find(o => U.dist2(o.x, o.y, e.x, e.y) < 45 * 45 && (o.type === 'vehicle' || (SIM.weaponOf(o) && SIM.weaponOf(o).kind === 'at') || (o.models && o.models.some(m => m.alive && m.weapon && D.W[m.weapon].kind === 'at'))));
+    if (threat && !e.backT) {
+      const away = Math.atan2(e.y - threat.y, e.x - threat.x), bx = e.x + Math.cos(away) * FIX.backOff, by = e.y + Math.sin(away) * FIX.backOff;
+      const q = MAP.nearestOpen(MAP.navGrids(G.map).veh, G.map, bx, by, MAP.mainRegion(G.map, true));
+      e.backT = G.t + 6; SIM.issue(G, [e.id], { type: 'reverse', x: q.x, y: q.y }); return true;
+    }
+    if (e.order.type === 'reverse' && e.backT > G.t) return true;
+    if (e.order.type !== 'move' || Math.hypot(e.order.x - spot.x, e.order.y - spot.y) > 3) SIM.issue(G, [e.id], { type: 'move', x: spot.x, y: spot.y });
+    return true;
   }
 
   function command(G, me, mine, S) {
@@ -226,10 +326,16 @@ const AI = (() => {
         if (e.retreating) continue;
         // just back from a retreat: wait to refill
         if (al < e.maxModels && SIM.nearReinforcePoint(G, e) && me.res.mp > e.def.reinforce) { if (e.order.type !== 'idle') SIM.issue(G, [e.id], { type: 'stop' }); continue; }
-      } else if (e.type === 'vehicle' && e.hp < e.maxHp * .3 && G.t - e.lastHit < 6) { if (e.order.type !== 'move') SIM.issue(G, [e.id], { type: 'retreat' }); continue; }
+      } else if (e.type === 'vehicle' && vehicleFix(G, me, e, visibleEnemies)) continue;
       if (e.def.builder && (e.order.type === 'build' || e.order.type === 'repair')) continue;
-      // repair damaged vehicles near base
-      if (e.def.builder) { const hurt = units.find(v => v.type === 'vehicle' && v.hp < v.maxHp * .7 && U.dist2(v.x, v.y, e.x, e.y) < 40 * 40); if (hurt) { SIM.issue(G, [e.id], { type: 'repair', target: hurt.id }); continue; } }
+      // repair: a vehicle falling back for it (wherever it is, if the ground round it is clear), else any damaged one near
+      if (e.def.builder) {
+        const safe = v => !visibleEnemies.some(o => U.dist2(o.x, o.y, v.x, v.y) < 25 * 25);
+        const taken = v => units.filter(b => b !== e && b.order.type === 'repair' && b.order.target === v.id).length;
+        const hurt = units.filter(v => v.type === 'vehicle' && v.hp < v.maxHp && (v.fixing ? U.dist2(v.x, v.y, e.x, e.y) < 110 * 110 : v.hp < v.maxHp * .7 && U.dist2(v.x, v.y, e.x, e.y) < 40 * 40) && safe(v) && taken(v) < 2)
+          .sort((a, b) => (b.fixing ? 1 : 0) - (a.fixing ? 1 : 0) || U.dist2(a.x, a.y, e.x, e.y) - U.dist2(b.x, b.y, e.x, e.y))[0];
+        if (hurt) { SIM.issue(G, [e.id], { type: 'repair', target: hurt.id }); continue; }
+      }
       // anti-tank: go for visible vehicles
       const atWeapon = e.type === 'squad' ? e.models.some(m => m.alive && m.weapon && D.W[m.weapon].kind === 'at') || (SIM.weaponOf(e) && SIM.weaponOf(e).kind === 'at') : D.W[e.def.weapons[0]].kind === 'cannon' && D.W[e.def.weapons[0]].pen[0] >= 150;
       if (atWeapon) {
@@ -243,7 +349,16 @@ const AI = (() => {
         if (cw && cw.kind !== 'at') {
           const far = cw.rng[2] * (cw.kind === 'indirect' ? .95 : .85), near = cw.minRange || 0;
           const tgt = visibleEnemies.filter(o => o.type === 'squad' && !o.retreating).map(o => ({ o, d: Math.hypot(o.x - e.x, o.y - e.y) })).filter(t => t.d < far && t.d > near + 3).sort((a, b) => a.d - b.d)[0];
-          if (tgt) { SIM.issue(G, [e.id], { type: 'setup', heading: Math.atan2(tgt.o.y - e.y, tgt.o.x - e.x) }); continue; }
+          if (tgt) {
+            const face = Math.atan2(tgt.o.y - e.y, tgt.o.x - e.x);
+            // a machine gun ducks behind cover a few steps away first, and sets up there on arrival; in the open only if there is none
+            if (cw.kind === 'mg') {
+              if ((e.mgCoverT || 0) > G.t && e.order.type === 'move') continue;
+              const sp = coverSpot(G, e.x, e.y, face, 9, e.x, e.y);
+              if (sp && Math.hypot(sp.x - e.x, sp.y - e.y) > 1.5 && Math.hypot(tgt.o.x - sp.x, tgt.o.y - sp.y) > near + 3) { e.mgCoverT = G.t + 6; SIM.issue(G, [e.id], { type: 'move', x: sp.x, y: sp.y, face: Math.atan2(tgt.o.y - sp.y, tgt.o.x - sp.x) }); continue; }
+            }
+            SIM.issue(G, [e.id], { type: 'setup', heading: face }); continue;
+          }
         }
       }
       // grenades at enemies in cover
@@ -269,10 +384,24 @@ const AI = (() => {
           if (gs && G.rng() < .6) { SIM.issue(G, [e.id], { type: 'ability', id: 'breach', x: gs.x, y: gs.y }); continue; }
         }
         if (e.def.abilities.includes('barrage') && (e.cooldowns.barrage || 0) < G.t && e.crew && e.crew.state === 'deployed') {
-          // shell team weapons first, then squads dug in (garrisons, heavy cover) that small arms can't shift
-          const inReach = o => o.type === 'squad' && !o.retreating && U.dist2(o.x, o.y, e.x, e.y) < 85 * 85 && U.dist2(o.x, o.y, e.x, e.y) > 30 * 30;
-          const tgt = visibleEnemies.find(o => inReach(o) && o.def.crewWeapon) || visibleEnemies.find(o => inReach(o) && (o.garrison != null || COMBAT.squadCover(G, o) === 'heavy'));
+          // a set-up machine gun first, then other team weapons, then squads that have sat in cover or a building for a few seconds
+          const A = D.ABILITIES.barrage, cx = e.crew.x, cy = e.crew.y;
+          const inReach = o => o.type === 'squad' && !o.retreating && !o.moving && U.dist2(o.x, o.y, cx, cy) < (A.range - 2) ** 2 && U.dist2(o.x, o.y, cx, cy) > ((A.minRange || 25) + 2) ** 2;
+          const tgt = visibleEnemies.find(o => inReach(o) && COMBAT.isMg(o)) || visibleEnemies.find(o => inReach(o) && COMBAT.isTeam(o)) || visibleEnemies.find(o => inReach(o) && (o.coverT || 0) >= COMBAT.MORTAR.dugIn);
           if (tgt) { SIM.issue(G, [e.id], { type: 'ability', id: 'barrage', x: tgt.x, y: tgt.y }); continue; }
+        }
+        // nothing worth shelling in reach, but an enemy machine gun or dug-in squad in sight a little further: move up behind it to range
+        if (e.crew && SIM.weaponOf(e) && SIM.weaponOf(e).kind === 'indirect' && (e.mortarT || 0) < G.t && !(e.crew.state === 'deployed' && G.t - e.lastFire < 6)) {
+          const w = SIM.weaponOf(e), at = e.crew.state !== 'packed' ? e.crew : e;
+          const prey = visibleEnemies.map(o => ({ o, d: Math.hypot(o.x - at.x, o.y - at.y) })).map(t => ({ ...t, s: t.o.type === 'squad' && !t.o.moving && !t.o.retreating ? (COMBAT.isMg(t.o) ? t.d - 90 : COMBAT.isTeam(t.o) ? t.d - 45 : (t.o.coverT || 0) >= COMBAT.MORTAR.dugIn ? t.d - 25 : null) : null })).filter(t => t.s != null).sort((a, b) => a.s - b.s);
+          const inRange = prey.some(t => t.d <= w.rng[2] * .95 && t.d > (w.minRange || 0) + 2);
+          const t = prey[0];
+          if (!inRange && t && t.d < w.rng[2] + 45 && !visibleEnemies.some(o => U.dist2(o.x, o.y, at.x, at.y) < 25 * 25)) {
+            const home = Math.atan2(hq.y - t.o.y, hq.x - t.o.x), R = w.rng[2] * .78;
+            const q = MAP.nearestOpen(MAP.navGrids(G.map).inf, G.map, t.o.x + Math.cos(home) * R, t.o.y + Math.sin(home) * R);
+            e.mortarT = G.t + 15;
+            SIM.issue(G, [e.id], { type: 'move', x: q.x, y: q.y, face: Math.atan2(t.o.y - q.y, t.o.x - q.x) }); continue;
+          }
         }
       }
       // crew abandoned guns and pick up dropped weapons nearby when no enemy is close to them
@@ -318,7 +447,8 @@ const AI = (() => {
         const d = Math.hypot(g.p.x - e.x, g.p.y - e.y);
         // builders take only points close to home: losing the only builder stalls the whole tech tree
         if (e.def.builder && Math.hypot(g.p.x - hq.x, g.p.y - hq.y) > 75) continue;
-        const s = g.v * 40 - d * .35 - g.assigned * 25 + (e.type === 'vehicle' && g.p.type === 'victory' ? 20 : 0);
+        const isMg = e.crew && e.def.crewWeapon === 'tripod_mg';
+        const s = g.v * 40 - d * .35 - g.assigned * 25 + (e.type === 'vehicle' && g.p.type === 'victory' ? 20 : 0) + (isMg ? (g.p.owner === slot ? 35 : g.p.owner === enemy ? -25 : 0) : 0);
         if (s > bs) { bs = s; best = g; }
       }
       if (!best) continue;
@@ -334,6 +464,16 @@ const AI = (() => {
         if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
       }
       if (e.garrison != null && G.map.houses[e.garrison] && G.map.houses[e.garrison].pit && U.dist2(e.x, e.y, p.x, p.y) < 25 * 25) continue;   // already holding it from a position
+      // a machine gun: behind cover (or in a house) by the point, aimed down the enemy's way in
+      if (e.crew && e.def.crewWeapon === 'tripod_mg') {
+        if (e.garrison != null && U.dist2(e.x, e.y, p.x, p.y) < 25 * 25) continue;
+        const plan = mgPlan(G, me, e, p);
+        if (plan) {
+          if (plan.kind === 'house') { SIM.issue(G, [e.id], { type: 'garrison', house: plan.h.id }); continue; }
+          if (U.dist2(plan.x, plan.y, e.crew.state !== 'packed' ? e.crew.x : e.x, e.crew.state !== 'packed' ? e.crew.y : e.y) < 2.5 * 2.5) { if (e.crew.state !== 'packed' && Math.abs(U.angNorm(plan.face - e.crew.heading)) > .5) SIM.issue(G, [e.id], { type: 'setup', heading: plan.face }); continue; }
+          SIM.issue(G, [e.id], { type: 'move', x: plan.x, y: plan.y, face: plan.face }); continue;
+        }
+      }
       // infantry sometimes hold the point from a house beside it
       if (e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < .3) {
         const h = G.map.houses.find(h => !h.dead && h.occ == null && !(h.built < 1) && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
@@ -346,6 +486,6 @@ const AI = (() => {
       SIM.issue(G, [e.id], { type: e.crew ? 'move' : 'attackMove', x: tx, y: ty, face: toward });
     }
   }
-  return { step };
+  return { step, mgPlan, approach, repairSpot };
 })();
 if (typeof module !== 'undefined') module.exports = AI;

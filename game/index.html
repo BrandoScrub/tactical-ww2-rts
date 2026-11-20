@@ -83,7 +83,7 @@
   .line { display: flex; gap: 10px; font-size: 12px; margin: 3px 0; flex-wrap: wrap; } .line .state { color: #ffb36a; } .weap, .armor { color: var(--dim); font-size: 11.5px; }
   .hp { position: relative; height: 9px; background: #3a0f0c; border: 1px solid #000; margin-top: 6px; } .hp i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#69c76a, #2e8a34); } .hp span { position: absolute; inset: -3px 0 0; text-align: center; font: 700 9px Inter; text-shadow: 0 0 2px #000; }
   .queue { display: flex; gap: 3px; margin-top: 6px; } .qi { position: relative; width: 38px; height: 38px; border: 1px solid #000; background: #1d1e1c; cursor: pointer; } .qi img { width: 100%; height: 100%; } .qi i { position: absolute; left: 0; bottom: 0; height: 4px; background: #6ab4ff; }
-  .multi { display: flex; flex-wrap: wrap; gap: 3px; } .mt { position: relative; width: 36px; height: 40px; background: #182027; border: 1px solid #000; display: grid; place-items: center; } .mt img { width: 22px; } .mt b { position: absolute; left: 2px; bottom: 0; font: 700 10px Inter; }
+  .multi { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; } .mt { position: relative; width: 36px; height: 40px; background: #182027; border: 1px solid #000; box-shadow: inset 0 3px 0 var(--us); display: grid; place-items: center; } .mt.o1 { background: #271716; box-shadow: inset 0 3px 0 var(--de); } .mt img { width: 22px; } .mt b { position: absolute; left: 2px; bottom: 3px; font: 700 10px Inter; } .mt i { position: absolute; left: 0; bottom: 0; height: 3px; }
   .slotcol { grid-column: 2; display: flex; flex-direction: column; gap: 4px; padding: 4px; background: repeating-linear-gradient(0deg, #1a1a19 0 2px, #222 2px 4px); border: 1px solid #000; box-shadow: inset 0 0 0 1px #3a3934; }
   .slotcol .toggle { position: relative; width: 30px; height: 30px; border: 1px solid #000; background: #2a2b28; cursor: pointer; padding: 0; } .slotcol .toggle img { width: 100%; } .slotcol .toggle.on::after { content: ''; position: absolute; right: 1px; top: 1px; width: 6px; height: 6px; border-radius: 50%; background: #5f5; box-shadow: 0 0 4px #5f5; } .slotcol .toggle .k { position: absolute; right: 1px; bottom: 0; font: 700 9px Inter; background: #000a; padding: 0 2px; }
   .slotcol .eq { width: 30px; height: 30px; border: 1px solid #000; background: #2a2b28; } .slotcol .eq img { width: 100%; }
@@ -127,7 +127,7 @@
   body.mobile .mmbtns .logo { display: none; } body.mobile .bgstrip { bottom: 250px; }
   body.mobile .tip { right: 8px; bottom: auto; top: 60px; }
   body.mobile .tbar { display: flex; position: absolute; left: 8px; top: 8px; gap: 5px; }
-  .tbar button { width: 52px; height: 48px; border: 1px solid #000; background: linear-gradient(#3a3b37, #222320); box-shadow: inset 0 0 0 1px #555; font-size: 18px; line-height: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
+  .tbar button { width: 46px; height: 48px; border: 1px solid #000; background: linear-gradient(#3a3b37, #222320); box-shadow: inset 0 0 0 1px #555; font-size: 18px; line-height: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; }
   .tbar button small { font: 600 10px Inter, system-ui; color: var(--dim); } .tbar button.on { box-shadow: inset 0 0 0 2px var(--gold); background: linear-gradient(#5a4a2a, #3a2f1a); }
   .box { max-height: 92vh; overflow: auto; }
   body.mobile .controls .desk { display: none; } .controls .touch { display: none; } body.mobile .controls .touch { display: contents; }
@@ -218,12 +218,13 @@
     <h2>How to play</h2>
     <div class="sub">Capture points to grow your territory and income. Victory points drain the enemy score. Build up from your HQ, keep squads in cover, and retreat them before they are wiped out.</div>
     <div class="controls">
-      <span class="touch"><b>Tap</b><span>select your unit; with units selected, tap ground to move or an enemy to attack</span>
+      <span class="touch"><b>Tap</b><span>select your unit; with units selected, tap ground to move, an enemy to attack, a house to garrison it or a point's icon to capture it</span>
       <b>Long-press</b><span>attack-move there; long-press a command button to read it</span>
       <b>Drag / pinch</b><span>pan / zoom the camera; tap the minimap to jump</span>
-      <b>Toolbar</b><span>Box: drag to select several &middot; Add: taps add to the selection &middot; Clear &middot; HQ &middot; Full screen</span></span>
+      <b>Toolbar</b><span>Box: drag to select several &middot; Add: taps add to the selection &middot; Queue: each order waits for the one before &middot; Clear &middot; HQ &middot; Full screen</span></span>
       <span class="desk" style="display:contents"><b>Left click / drag</b><span>select; double-click selects that kind on screen; Shift adds</span>
-      <b>Right click</b><span>move, or attack what is under the cursor; right-drag sets the facing (squads take cover that way, vehicles turn to it, team weapons set up that way); Shift queues waypoints; a short move behind a vehicle backs it up</span>
+      <b>Right click</b><span>move, or attack what is under the cursor; a house garrisons it; a point's icon sends the selection to capture it; right-drag sets the facing (squads take cover that way, vehicles turn to it, team weapons set up that way); a short move behind a vehicle backs it up</span>
+      <b>Shift</b><span>queue orders: moves, attacks, garrisons, captures, abilities and buildings each wait for the one before</span>
       <b>Q W E R</b><span>top row: attack-move, stop, reverse (vehicles), retreat</span>
       <b>A S D F &middot; Z X C V</b><span>abilities, set-up facing, upgrades, construction; on buildings the units they produce</span>
       <b>Ctrl + 1-9, 1-9</b><span>assign and recall control groups; press twice to jump there; Shift + 1-9 adds a group to the selection; Ctrl + A selects your whole army</span>

@@ -194,6 +194,9 @@ const SIM = (() => {
           const p = MAP.clearRun(grid, G.map, c.x, c.y, o.x + (ca * of.f - sa * of.s) * sp, o.y + (sa * of.f + ca * of.s) * sp);
           tx = p.x; ty = p.y;
         }
+        // sent to a capture point: every slot stays inside its circle, so each squad helps take it
+        const P = o.point != null ? G.map.points[o.point] : null;
+        if (P) { const d = Math.hypot(tx - P.x, ty - P.y), lim = Math.max(1, P.radius - 1.6); if (d > lim) { tx = P.x + (tx - P.x) * lim / d; ty = P.y + (ty - P.y) * lim / d; } const grid = e.type === 'vehicle' ? nav.veh : nav.inf; if (!MAP.walkable(grid, G.map, tx, ty)) { const q = MAP.nearestOpen(grid, G.map, tx, ty); tx = q.x; ty = q.y; } }
         orderEnt(G, e, { ...o, x: tx, y: ty, face: explicit ? ang : Math.atan2(ty - e.y, tx - e.x), faceSet: explicit }, queue);
       });
       return;
@@ -204,7 +207,7 @@ const SIM = (() => {
       if (!builders.length) return;
       orderEnt(G, builders[0], o, queue);
       const jobs = builders[0].buildQueue || [];
-      for (const b of builders.slice(1)) if (jobs.length) { b.buildQueue = jobs.map(j => ({ ...j })); b.order = { type: 'build' }; b.path = null; b.slots = null; b.retreating = false; }
+      if (!queue) for (const b of builders.slice(1)) if (jobs.length) { b.buildQueue = jobs.map(j => ({ ...j })); b.order = { type: 'build' }; b.path = null; b.slots = null; b.retreating = false; }
       return;
     }
     for (const e of ents) orderEnt(G, e, o, queue);
@@ -212,11 +215,20 @@ const SIM = (() => {
   function orderEnt(G, e, o, queue) {
     if (e.type === 'building') return buildingOrder(G, e, o);
     if (e.retreating) return;   // already on its way back; see issue()
-    if (queue && e.order.type !== 'idle' && (o.type === 'move' || o.type === 'attackMove')) { (e.queue = e.queue || []).push(o); return; }
-    e.queue = [];
+    // Shift (or the Queue button on touch): a builder places a queued building or defence at once and pays for it, as in
+    // CoH3, and works through the jobs in order; any other order waits its turn behind what the unit is doing now
+    if (queue && o.type === 'build' && e.type === 'squad' && e.def.builder) {
+      const jobs = placeBuild(G, e, o); if (!jobs) return;
+      if (e.order.type === 'build' && !(e.queue && e.queue.length)) e.buildQueue.push(...jobs);
+      else if (busy(e)) pushQueue(G, e, { type: 'jobs', jobs });
+      else beginJobs(e, jobs);
+      return;
+    }
+    if (queue && QUEUEABLE.has(o.type) && busy(e)) { pushQueue(G, e, o); return; }
+    if (!o.fromQueue) e.queue = [];
     if (e.type === 'squad' && e.models.some(m => m.alive) && isPinned(e) && o.type !== 'retreat') return;   // pinned squads only retreat
     // a garrisoned squad steps out for anything that takes it elsewhere; it fires from the windows for attack orders
-    if (e.type === 'squad' && e.garrison != null && ['move', 'attackMove', 'retreat', 'build', 'repair'].includes(o.type)) leaveHouse(G, e, o.x, o.y);
+    if (e.type === 'squad' && e.garrison != null && ['move', 'attackMove', 'retreat', 'build', 'repair', 'jobs'].includes(o.type)) leaveHouse(G, e, o.x, o.y);
     if (e.type === 'squad' && e.garrison != null && o.type === 'ability' && (o.id === 'barrage' || o.id === 'smokeBarrage')) leaveHouse(G, e, o.x, o.y);
     switch (o.type) {
       case 'garrison': if (canGarrison(e)) orderGarrison(G, e, G.map.houses[o.house]); break;
@@ -254,11 +266,43 @@ const SIM = (() => {
       }
       case 'retreat': if (e.type === 'squad') retreat(G, e); else { const hq = hqOf(G, e.owner); if (hq) orderEnt(G, e, { type: 'move', x: hq.rally.x, y: hq.rally.y }); } break;
       case 'build': if (e.type === 'squad' && e.def.builder) startBuild(G, e, o); break;
+      case 'jobs': if (e.type === 'squad' && e.def.builder) beginJobs(e, o.jobs.slice()); break;
       case 'repair': if (e.type === 'squad' && e.def.builder) { e.order = { type: 'repair', target: o.target }; e.path = null; e.buildQueue = []; } break;
       case 'ability': useAbility(G, e, o); break;
       case 'upgrade': upgradeSquad(G, e, o.id); break;
       case 'setup': if (e.crew) { e.order = { type: 'idle' }; e.path = null; setup(G, e, o.heading); } break;
     }
+  }
+  /* ---------------- queued orders ---------------- */
+  const QUEUEABLE = new Set(['move', 'attackMove', 'reverse', 'attack', 'garrison', 'unload', 'pickup', 'recrew', 'repair', 'ability', 'jobs']);
+  /* doing something: walking, fighting a target, building, or with orders already waiting */
+  function busy(e) { return e.order.type !== 'idle' || !!(e.path && e.path.length) || !!(e.buildQueue && e.buildQueue.length) || !!(e.queue && e.queue.length); }
+  /* a queued order keeps a map position (drawn as a waypoint) even when it names a target, a house or a job */
+  function pushQueue(G, e, o) {
+    const q = { ...o, fromQueue: true };
+    if (q.x == null) {
+      const at = o.type === 'garrison' ? G.map.houses[o.house] : o.type === 'pickup' ? dropById(G, o.drop) : o.type === 'jobs' ? jobPos(G, o.jobs[0]) : o.target != null ? G.byId.get(o.target) : null;
+      if (at) { q.x = at.x; q.y = at.y; }
+    }
+    e.queue = e.queue || [];
+    if (e.queue.length < 16) e.queue.push(q);
+  }
+  function jobPos(G, j) {
+    if (!j) return null;
+    const t = j.kind === 'building' ? G.byId.get(j.id) : j.kind === 'pit' ? G.map.houses[j.id] : G.map.covers[j.id];
+    return !t ? null : j.kind === 'cover' ? { x: (t.ax + t.bx) / 2, y: (t.ay + t.by) / 2 } : { x: t.x, y: t.y };
+  }
+  /* the next waiting order: run it, the rest stay queued behind it */
+  function nextQueued(G, e) {
+    const rest = e.queue; e.queue = [];
+    const n = rest.shift();
+    orderEnt(G, e, n, false);
+    e.queue = (e.queue || []).concat(rest);
+  }
+  function readyForNext(e) {
+    if (e.retreating || e.order.type !== 'idle' || (e.path && e.path.length) || (e.buildQueue && e.buildQueue.length)) return false;
+    if (e.type === 'squad' && isPinned(e)) return false;
+    return true;
   }
   function setPath(G, e, x, y) {
     const veh = e.type === 'vehicle';
@@ -333,38 +377,44 @@ const SIM = (() => {
   /* ---------------- construction ---------------- */
   /* o: {type:'build', what: building id | defence id, x, y, x2, y2} */
   function startBuild(G, sq, o) {
+    const jobs = placeBuild(G, sq, o);
+    if (jobs) beginJobs(sq, jobs);
+  }
+  function beginJobs(sq, jobs) { sq.buildQueue = jobs; sq.order = { type: 'build' }; sq.path = null; sq.slots = null; sq.retreating = false; }
+  /* lay out (and pay for) a building, fighting position or defence line; returns the squad's jobs, or null with the reason as an alert */
+  function placeBuild(G, sq, o) {
     const P = G.players[sq.owner];
     if (D.BUILDINGS[o.what]) {
       const why = canPlace(G, sq.owner, o.what, o.x, o.y) || buildReqMissing(G, sq.owner, o.what);
-      if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return; }
-      const def = D.BUILDINGS[o.what]; if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return; }
+      if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return null; }
+      const def = D.BUILDINGS[o.what]; if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return null; }
       pay(P, def.cost);
       const b = placeBuilding(G, o.what, sq.owner, o.x, o.y, 0); b.hp = def.hp * .1;
-      sq.buildQueue = [{ kind: 'building', id: b.id }];
+      return [{ kind: 'building', id: b.id }];
     } else if (D.DEFENCES[o.what] && D.DEFENCES[o.what].point) {
       const def = D.DEFENCES[o.what];
-      const why = canPit(G, sq.owner, o.what, o.x, o.y); if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return; }
-      if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return; }
+      const why = canPit(G, sq.owner, o.what, o.x, o.y); if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return null; }
+      if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return null; }
       pay(P, def.cost);
       const foe = hqOf(G, 1 - sq.owner), face = o.face != null ? o.face : foe ? Math.atan2(foe.y - o.y, foe.x - o.x) : sq.heading;
       const h = G.map.addPit(o.x, o.y, { ...def, id: o.what }, sq.owner, face);
       // anyone standing where it is dug steps out of the way
       const nav = MAP.navGrids(G.map).inf;
       for (const e of G.ents) if (e.type === 'squad' && !e.dead && e.garrison == null) for (const m of e.models) if (m.alive && Math.hypot(m.x - h.x, m.y - h.y) < h.w / 2 + .2) { const q = MAP.nearestOpen(nav, G.map, m.x, m.y); m.x = q.x; m.y = q.y; m.spath = null; }
-      sq.buildQueue = [{ kind: 'pit', id: h.id }];
+      return [{ kind: 'pit', id: h.id }];
     } else if (D.DEFENCES[o.what]) {
       const def = D.DEFENCES[o.what];
       const x2 = o.x2 == null ? o.x + Math.cos(sq.heading + Math.PI / 2) * def.len : o.x2, y2 = o.y2 == null ? o.y + Math.sin(sq.heading + Math.PI / 2) * def.len : o.y2;
-      const L = Math.hypot(x2 - o.x, y2 - o.y), n = Math.max(1, Math.round(L / def.len));
-      sq.buildQueue = [];
+      const L = Math.hypot(x2 - o.x, y2 - o.y), n = Math.max(1, Math.round(L / def.len)), jobs = [];
       for (let i = 0; i < n; i++) {
         const ax = o.x + (x2 - o.x) * i / n, ay = o.y + (y2 - o.y) * i / n, bx = o.x + (x2 - o.x) * (i + 1) / n, by = o.y + (y2 - o.y) * (i + 1) / n;
         const c = G.map.addCover(o.what, ax, ay, bx, by, { cover: def.cover, blocksV: def.blocksVehicles, blocksI: false, hp: def.hp, owner: sq.owner, built: 0 });
         c.blocksIWhenBuilt = def.blocksInfantry; c.buildTime = def.time;
-        sq.buildQueue.push({ kind: 'cover', id: c.id });
+        jobs.push({ kind: 'cover', id: c.id });
       }
-    } else return;
-    sq.order = { type: 'build' }; sq.path = null; sq.slots = null; sq.retreating = false;
+      return jobs;
+    }
+    return null;
   }
   /* where a fighting position can go: the faction's own kind, on open ground, clear of houses and other positions */
   function canPit(G, owner, id, x, y) {
@@ -782,7 +832,9 @@ const SIM = (() => {
   }
   function arrive(G, sq) {
     const o = sq.order;
-    if (sq.queue && sq.queue.length) { const n = sq.queue.shift(); sq.order = { type: n.type, x: n.x, y: n.y, face: n.face, faceSet: n.faceSet }; setPath(G, sq, n.x, n.y); return; }
+    // walking orders hand straight on to the next queued one (no stop in between); other orders use paths along the way
+    // and are followed up from step() once they finish
+    if (sq.queue && sq.queue.length && (o.type === 'move' || o.type === 'attackMove')) { sq.order = { type: 'idle' }; nextQueued(G, sq); return; }
     if (o.type === 'move' || o.type === 'attackMove') {
       sq.face = o.face != null ? o.face : sq.heading; sq.faceSet = !!o.faceSet;
       sq.order = { type: 'idle' };
@@ -969,7 +1021,7 @@ const SIM = (() => {
   }
   function vehicleArrive(G, v) {
     v.autoRev = false;
-    if (v.queue && v.queue.length) { const n = v.queue.shift(); v.order = { type: n.type, x: n.x, y: n.y, face: n.face, faceSet: n.faceSet }; setPath(G, v, n.x, n.y); return; }
+    if (v.queue && v.queue.length && v.order.type !== 'attack') { v.order = { type: 'idle' }; nextQueued(G, v); return; }
     if (v.order.type !== 'attack') { if (v.order.faceSet && v.order.type !== 'reverse') v.faceTo = v.order.face; v.order = { type: 'idle' }; }
   }
   function crush(G, v) {
@@ -1060,7 +1112,29 @@ const SIM = (() => {
     }
     return null;
   }
+  /* Engineers standing idle next to a damaged vehicle of their own side get to work on it (the AI sends its engineers to
+     repair on purpose; this catches the player's too, e.g. a tank pulled back to base beside them). Out of combat only. */
+  const AUTO_REPAIR = { reach: 14, every: 1, quiet: 5 };
+  function autoRepair(G, sq) {
+    if (!sq.def.builder || sq.retreating || sq.garrison != null || sq.order.type !== 'idle' || (sq.path && sq.path.length) || (sq.queue && sq.queue.length) || (sq.buildQueue && sq.buildQueue.length)) return;
+    if ((sq.autoRepT || 0) > G.t || G.t - sq.lastHit < AUTO_REPAIR.quiet) return;
+    sq.autoRepT = G.t + AUTO_REPAIR.every;
+    let best = null, bd = AUTO_REPAIR.reach ** 2;
+    for (const v of G.ents) {
+      if (v.dead || v.type !== 'vehicle' || v.owner !== sq.owner || v.hp >= v.maxHp || v.speed > .6 || G.t - v.lastHit < AUTO_REPAIR.quiet) continue;
+      const d = U.dist2(v.x, v.y, sq.x, sq.y); if (d < bd) { bd = d; best = v; }
+    }
+    if (best) orderEnt(G, sq, { type: 'repair', target: best.id });
+  }
+  /* a vehicle of the player's that is badly hurt: say so once, so it can be pulled back for repairs */
+  function vehicleWatch(G, v) {
+    if (v.owner < 0) return;
+    const f = v.hp / v.maxHp;
+    if (f < .35 && !v.lowWarned) { v.lowWarned = true; event(G, v.owner, 'lost', v.def.name + ' badly damaged: pull it back for repairs', v.x, v.y); }
+    else if (f > .6) v.lowWarned = false;
+  }
   function stepSquadSupport(G, sq, dt) {
+    autoRepair(G, sq);
     const P = G.players[sq.owner], alive = sq.models.filter(m => m.alive).length;
     const inCombat = G.t - sq.lastHit < 4;
     const rp = (alive < sq.maxModels || sq.upgrading || alive) ? nearReinforcePoint(G, sq) : null;
@@ -1113,7 +1187,9 @@ const SIM = (() => {
         stepSquadSupport(G, e, dt);
       } else if (e.type === 'vehicle') {
         stepVehicleMove(G, e, dt);
+        vehicleWatch(G, e);
       }
+      if (e.type !== 'building' && e.queue && e.queue.length && !e.dead && readyForNext(e)) nextQueued(G, e);   // a building's queue is its production line
     }
     COMBAT.step(G, dt);
     stepDrops(G);
@@ -1145,7 +1221,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, canPit, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, busy, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, canPit, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, connected, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
