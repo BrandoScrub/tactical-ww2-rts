@@ -29,7 +29,7 @@ const RENDER = (() => {
      ground below is drawn instead, so nothing else depends on them. */
   const GROUND_TILES = ['ground_dry_grass', 'ground_dry_grass_patchy', 'ground_dry_grass_scorched', 'ground_green_grass',
     'ground_white_road', 'ground_white_road_alt', 'ground_dirt', 'ground_dirt_alt', 'field_wheat', 'field_stubble',
-    'field_stubble_alt', 'field_ploughed'];
+    'field_stubble_alt', 'field_ploughed', 'ground_olive_grove', 'crater_earth'];
   const TILE_M = { _: 6, ground_white_road: 6.4, ground_white_road_alt: 6.4, field_ploughed: 7, field_stubble: 6, field_wheat: 5 };
   const ROAD_W = 5.6;                       // gravel width in metres (the old stand-in's middle stroke)
   R.tiles = {};
@@ -119,7 +119,7 @@ const RENDER = (() => {
     layer('ground_dirt', yardMask, .95);
     // 3. fields: each kind's tile in its rotated plot, rows along the plot, a darker worn margin round it
     const FIELD = { wheat: ['field_wheat', 1], stubble: ['field_stubble', 1], ploughed: ['field_ploughed', 1], green: ['ground_green_grass', 1],
-                    olive: ['ground_dirt_alt', .6] };   // olive: stand-in until ground_olive_grove is painted
+                    olive: ['ground_olive_grove', .9] };   // a little dry grass shows through under the olives
     for (const f of m.fields) {
       const [n, a] = FIELD[f.kind] || []; const p = n && pat(n);
       g.save(); g.translate(f.x * S, f.y * S); g.rotate(f.rot);
@@ -294,6 +294,24 @@ const RENDER = (() => {
     g.putImageData(R.fogImg, 0, 0);
   }
 
+  /* Crater sprites: discs of crater_earth with a soft edge, a few variants cut from different parts of the tile,
+     drawn on a plain 2D canvas once (the frame context may be WebGL, which has no patterns). One sprite spans a
+     4 m crater, so the tile keeps about the ground's scale (TILE_M metres a tile). */
+  function craterSprites() {
+    if (R.craterSpr !== undefined) return R.craterSpr;
+    const im = R.tiles.crater_earth; if (!im) return null;
+    const P = 128, D = 4, tile = Math.round(TILE_M._ / D * P), out = [];
+    for (let v = 0; v < 4; v++) {
+      const s = canvas(P, P), g = s.getContext('2d'), t = canvas(tile, tile);
+      t.getContext('2d').drawImage(im, 0, 0, tile, tile);
+      g.save(); g.translate(-(v * 53 % tile), -(v * 97 % tile)); g.fillStyle = g.createPattern(t, 'repeat'); g.fillRect(0, 0, P + tile, P + tile); g.restore();
+      const rg = g.createRadialGradient(P / 2, P / 2, P * .22, P / 2, P / 2, P / 2);
+      rg.addColorStop(0, 'rgba(0,0,0,.95)'); rg.addColorStop(.6, 'rgba(0,0,0,.8)'); rg.addColorStop(1, 'rgba(0,0,0,0)');
+      g.globalCompositeOperation = 'destination-in'; g.fillStyle = rg; g.fillRect(0, 0, P, P);
+      out.push(s);
+    }
+    return (R.craterSpr = out);
+  }
   function frame(G, ui, alpha) {
     R.G = G;
     const c = R.ctx, k = R.cam.k, me = 0;
@@ -303,9 +321,19 @@ const RENDER = (() => {
     drawFlat(c, k, R.ground, R.groundS || 8);
     if (ui.heightView) { if (R.heightKey !== G.map.seed + ':' + G.map.w) buildHeightView(G); drawFlat(c, k, R.heightC, 4); }
     const vis = (x, y, pad) => { const [sx, sy] = toScreen(x, y); return sx > -pad && sx < R.W + pad && sy > -pad && sy < R.H + pad * 1.5; };
-    // craters
+    // craters: a soft dark stain, then churned earth (crater_earth) inside it
     c.fillStyle = 'rgba(58,46,30,.55)';
     for (const cr of G.map.craters) { if (!vis(cr.x, cr.y, 80)) continue; const [sx, sy] = toScreen(cr.x, cr.y); c.beginPath(); c.ellipse(sx, sy, cr.r * 31 * k, cr.r * 15.5 * k, 0, 0, U.TAU); c.fill(); }
+    const cs = craterSprites();
+    if (cs) {                                  // laid flat on the ground through the same iso transform as the tiles
+      const [ox, oy] = toScreen(0, 0);
+      c.setTransform(PXM * k, PXM * .5 * k, -PXM * k, PXM * .5 * k, ox, oy);
+      for (const cr of G.map.craters) {
+        if (!vis(cr.x, cr.y, 80)) continue; const rr = cr.r * .9;
+        c.drawImage(cs[(Math.round(cr.x * 7 + cr.y * 13) % cs.length + cs.length) % cs.length], cr.x - rr, cr.y - rr, 2 * rr, 2 * rr);
+      }
+      c.setTransform(1, 0, 0, 1, 0, 0);
+    }
     c.strokeStyle = 'rgba(30,24,16,.4)'; c.lineWidth = 1.5 * k;
     for (const cr of G.map.craters) { if (!vis(cr.x, cr.y, 80)) continue; const [sx, sy] = toScreen(cr.x, cr.y); c.beginPath(); c.ellipse(sx, sy - 1, cr.r * 27 * k, cr.r * 13 * k, 0, 0, U.TAU); c.stroke(); }
     drawSectorLines(G, c, k);
