@@ -865,7 +865,7 @@ const SIM = (() => {
       else { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); }
     }
     // a vehicle found inside an obstacle (a building raised round it, a wreck) is moved to open ground at once
-    { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
+    { const grid = MAP.navGrids(G.map).veh; if (!MAP.walkable(grid, G.map, v.x, v.y)) { const o = MAP.nearestOpen(grid, G.map, v.x, v.y, MAP.mainRegion(G.map, true)); v.x = o.x; v.y = o.y; if (v.path && v.path.length) { const end = v.path[v.path.length - 1]; setPath(G, v, end.x, end.y); } } }
     let target = null;
     if (v.path && v.path.length && (v.owner < 0 || (v.crit && v.crit.engine === 2))) { v.path = null; if (v.order.type !== 'attack') v.order = { type: 'idle' }; }
     if (v.path && v.path.length && !(v.order.type === 'attackMove' && v.engageT > G.t)) target = v.path[0];
@@ -912,7 +912,8 @@ const SIM = (() => {
         const st = v.speed * dt * dir; let moved = false;
         for (const a of [.6, -.6, 1.2, -1.2]) { const sx = v.x + Math.cos(v.heading + a) * st, sy = v.y + Math.sin(v.heading + a) * st; if (MAP.walkable(grid, G.map, sx, sy)) { v.x = sx; v.y = sy; v.dist += Math.abs(st); moved = true; break; } }
         if (!moved) { v.speed *= .5; v.stuckT += dt; }
-        if (v.stuckT > 1.2 && v.path && v.path.length) { const end = v.path[v.path.length - 1]; const o = MAP.nearestOpen(grid, G.map, v.x + Math.cos(v.heading + Math.PI) * 1.5, v.y + Math.sin(v.heading + Math.PI) * 1.5); if (v.stuckT > 3) { v.x = o.x; v.y = o.y; } setPath(G, v, end.x, end.y); if (v.stuckT > 3) v.stuckT = 0; }
+        // backing out goes to open ground joined to the battlefield: a lone open cell between sandbags and a house trapped vehicles
+        if (v.stuckT > 1.2 && v.path && v.path.length) { const end = v.path[v.path.length - 1]; const o = MAP.nearestOpen(grid, G.map, v.x + Math.cos(v.heading + Math.PI) * 1.5, v.y + Math.sin(v.heading + Math.PI) * 1.5, MAP.mainRegion(G.map, true)); if (v.stuckT > 3) { v.x = o.x; v.y = o.y; } setPath(G, v, end.x, end.y); if (v.stuckT > 3) v.stuckT = 0; }
       }
       crush(G, v);
     }
