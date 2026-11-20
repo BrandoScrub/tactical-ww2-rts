@@ -341,12 +341,15 @@ const RENDER = (() => {
     // shadows of everything that moves, then all objects back to front
     const list = [];
     for (const t of G.map.trees) if (vis(t.x, t.y, 160)) list.push({ d: t.x + t.y, f: () => drawTree(c, t, k) });
-    for (const h of G.map.houses) if (!h.dead && vis(h.x, h.y, 260)) list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
+    const shadows = [];
+    for (const h of G.map.houses) if ((!h.dead || houseArt(h)) && vis(h.x, h.y, 260)) {
+      list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
+      if (houseArt(h)) { const [nx, ny] = toScreen(h.x + h.w / 2, h.y + h.d / 2); shadows.push(() => ArtKit.drawShadow(c, R.lib, h.art, houseState(h), nx, ny, k)); }
+    }
     for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) });
     for (const w of G.wrecks || []) if (vis(w.x, w.y, 200)) list.push({ d: w.x + w.y, f: () => drawWreck(G, c, w, k) });
     for (const d of G.drops || []) if (vis(d.x, d.y, 120) && FOG.explored(G, me, d.x, d.y)) list.push({ d: d.x + d.y, f: () => drawDrop(G, c, d, k, ui) });
     if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
-    const shadows = [];
     for (const e of G.ents) {
       if (e.dead) continue;
       if (!FOG.visible(G, me, e) && !(e.type === 'building')) continue;
@@ -440,7 +443,29 @@ const RENDER = (() => {
     f([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], left);
     if (top) f([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], top);
   }
+  /* Farmhouses: the artkit sprites (art/scenery/, tools/build_scenery.py) in three stages: intact, 'damaged' under 60%
+     health (roof holed, a breach in the end wall; still garrisonable), 'ruined' once collapsed (its rubble outline is the
+     cover). Without the art the drawn stand-in below shows, scorching and losing its roof as before. */
+  const houseArt = h => h.art && R.lib[h.art] ? h.art : null;
+  const houseState = h => h.dead ? 'ruined' : h.hp / h.maxHp < .6 ? 'damaged' : 'normal';
+  function drawHouseFlag(c, h, k, ridge) {
+    // occupied: the occupier's flag on the ridge (enemy flags only once the house has been seen)
+    if (h.occ == null || !R.G) return;
+    const o = R.G.byId.get(h.occ);
+    if (o && !o.dead && (o.owner === 0 || FOG.visible(R.G, 0, o))) {
+      const [px, py] = toScreen(h.x, h.y, ridge), [qx, qy] = toScreen(h.x, h.y, ridge + 3.2);
+      c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
+      c.fillStyle = TEAM[o.owner]; c.fillRect(qx, qy, 15 * k, 10 * k);
+    }
+  }
   function drawHouse(c, h, k) {
+    const art = houseArt(h);
+    if (art) {
+      const [nx, ny] = toScreen(h.x + h.w / 2, h.y + h.d / 2);      // the footprint's near corner, where artkit anchors a still
+      ArtKit.drawStatic(c, R.lib, art, houseState(h), nx, ny, k);
+      if (!h.dead) drawHouseFlag(c, h, k, 6.4);
+      return;
+    }
     const x0 = h.x - h.w / 2, x1 = h.x + h.w / 2, y0 = h.y - h.d / 2, y1 = h.y + h.d / 2, H = 4.2;
     const wall = h.wall === 'stone' ? ['#a89c84', '#8d8270'] : ['#d9c9a4', '#b9a884'];
     const [sx, sy] = toScreen(h.x, h.y); c.fillStyle = 'rgba(20,18,10,.3)'; c.beginPath(); c.ellipse(sx + 18 * k, sy + 8 * k, (h.w + h.d) * 17 * k, (h.w + h.d) * 7 * k, 0, 0, U.TAU); c.fill();
@@ -468,15 +493,7 @@ const RENDER = (() => {
       poly([[h.x, y0 - .3, ridge], [h.x, y1 + .3, ridge], [x1 + .3, y1 + .3, H], [x1 + .3, y0 - .3, H]], roof[2]);
       poly([[x0 - .3, y0 - .3, H], [h.x, y0 - .3, ridge], [h.x, y1 + .3, ridge], [x0 - .3, y1 + .3, H]], roof[0]);
     }
-    // occupied: the occupier's flag on the ridge (enemy flags only once the house has been seen)
-    if (h.occ != null && R.G) {
-      const o = R.G.byId.get(h.occ);
-      if (o && !o.dead && (o.owner === 0 || FOG.visible(R.G, 0, o))) {
-        const [px, py] = toScreen(h.x, h.y, ridge), [qx, qy] = toScreen(h.x, h.y, ridge + 3.2);
-        c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
-        c.fillStyle = TEAM[o.owner]; c.fillRect(qx, qy, 15 * k, 10 * k);
-      }
-    }
+    drawHouseFlag(c, h, k, ridge);
   }
   function drawCover(c, cv, k) {
     const L = Math.hypot(cv.bx - cv.ax, cv.by - cv.ay);
@@ -505,6 +522,8 @@ const RENDER = (() => {
       c.stroke();
       for (let i = 0; i <= n; i += 3) { const t = i / n, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t), [tx, ty] = toScreen(cv.ax + (cv.bx - cv.ax) * t, cv.ay + (cv.by - cv.ay) * t, 1); c.strokeStyle = '#5a4a32'; c.lineWidth = 2 * k; c.beginPath(); c.moveTo(sx, sy); c.lineTo(tx, ty); c.stroke(); }
     } else if (cv.kind === 'rubble') {
+      const hs = cv.house != null && R.G && R.G.map.houses[cv.house];
+      if (hs && houseArt(hs)) { if (a < 1) c.globalAlpha = 1; return; }   // a collapsed farmhouse: its ruin sprite shows the rubble
       const n = Math.max(1, Math.round(L / .7)), r = U.rng(cv.id * 7 + 3);
       for (let i = 0; i <= n; i++) { const t = i / n, j = r() - .5, [sx, sy] = toScreen(cv.ax + (cv.bx - cv.ax) * t + j * .5, cv.ay + (cv.by - cv.ay) * t - j * .5, r() * .5); const s2 = k * (.7 + r() * .5); c.globalAlpha = .9; c.drawImage(R.sprites.stone, sx - 12 * s2, sy - 9 * s2, 24 * s2, 16 * s2); }
       c.globalAlpha = 1;
