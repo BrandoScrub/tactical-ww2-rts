@@ -57,6 +57,12 @@ const FOG = (() => {
     }
     return seen(G, slot, e.x, e.y);
   }
-  return { update, seen, explored, visible, C };
+  /* What the screen shows. view.slot is whose fog is drawn (0 normally; either side when watching the AI) and
+     view.all shows everything (no fog). Only drawing and picking use these; the game rules use visible/seen. */
+  const view = { slot: 0, all: false };
+  const shown = (G, e) => view.all || visible(G, view.slot, e);
+  const shownAt = (G, x, y, owner) => view.all || owner === view.slot || explored(G, view.slot, x, y);
+  const shownNow = (G, x, y) => view.all || seen(G, view.slot, x, y);
+  return { update, seen, explored, visible, view, shown, shownAt, shownNow, C };
 })();
 if (typeof module !== 'undefined') module.exports = FOG;

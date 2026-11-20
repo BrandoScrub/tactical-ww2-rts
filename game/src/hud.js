@@ -5,7 +5,7 @@
 const HUD = (() => {
   const KEYS = ['Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F', 'Z', 'X', 'C', 'V'];
   const D = DATA;
-  const ui = { selected: new Set(), hover: null, hoverPoint: null, mode: null, page: 'main', ghost: null, coverPreview: null, paused: false, noFog: false, lastClick: 0 };
+  const ui = { selected: new Set(), hover: null, hoverPoint: null, mode: null, page: 'main', ghost: null, coverPreview: null, paused: false, noFog: false, fogSide: 0, lastClick: 0 };
   let G, el = {}, canvasEl, iconCache = {}, cardSlots = [], lastPanelKey = '', tip = null;
 
   const $ = s => document.querySelector(s);
@@ -88,8 +88,21 @@ const HUD = (() => {
     el.spec = null;
     if (G.spectate) {
       // watching the AI: both armies' purses and a speed switch under the score ticker
-      el.spec = h('div', 'specbar', `<div class="sp0"></div><div class="spd">${[1, 2, 4, 8].map(x => `<button data-x="${x}">${x}x</button>`).join('')}</div><div class="sp1"></div>`);
-      el.spec.addEventListener('click', ev => { const b = ev.target.closest('[data-x]'); if (b) MAIN.setSpeed(+b.dataset.x); });
+      // fog button: off, then each side's view in turn; the − button folds the bar down to the speed in use
+      el.spec = h('div', 'specbar', `<div class="sp0"></div><div class="spd">${[1, 2, 4, 8].map(x => `<button data-x="${x}">${x}x</button>`).join('')}</div><button class="fogb"></button><div class="sp1"></div><button class="minb"></button>`);
+      let folded = false; try { folded = localStorage.getItem('ww2rts.specMin') === '1'; } catch (err) { }
+      el.spec.classList.toggle('min', folded);
+      el.spec.addEventListener('click', ev => {
+        const b = ev.target.closest('button'); if (!b) return;
+        // folded, the one speed button left showing steps through the speeds
+        if (b.dataset.x) { const xs = [1, 2, 4, 8]; MAIN.setSpeed(el.spec.classList.contains('min') ? xs[(xs.indexOf(MAIN.speed()) + 1) % xs.length] : +b.dataset.x); }
+        else if (b.classList.contains('fogb')) {
+          if (ui.noFog) { ui.noFog = false; ui.fogSide = 0; } else if (!ui.fogSide) ui.fogSide = 1; else { ui.noFog = true; ui.fogSide = 0; }
+        } else if (b.classList.contains('minb')) {
+          const on = el.spec.classList.toggle('min'); try { localStorage.setItem('ww2rts.specMin', on ? '1' : '0'); } catch (err) { }
+        }
+        update(); drawMinimap();
+      });
       root.append(el.spec);
     }
     el.mmc = el.mm.querySelector('canvas');
@@ -211,6 +224,10 @@ const HUD = (() => {
       const line = Q => `<b style="color:${Q.F.colour}">${Q.F.name}</b> ${fmt(Q.res.mp)} mp &middot; ${fmt(Q.res.mu)} mu &middot; ${fmt(Q.res.fu)} fu &middot; pop ${Q.pop}/${Q.popCap}`;
       put(el.spec.querySelector('.sp0'), line(P)); put(el.spec.querySelector('.sp1'), line(E));
       el.spec.querySelectorAll('[data-x]').forEach(b => b.classList.toggle('on', +b.dataset.x === MAIN.speed()));
+      const fb = el.spec.querySelector('.fogb'), fs = G.players[ui.fogSide || 0];
+      put(fb, ui.noFog ? 'Fog off' : 'Fog: ' + (fs.side === 'us' ? 'US' : 'DE')); fb.classList.toggle('on', !ui.noFog);
+      const mn = el.spec.classList.contains('min'); put(el.spec.querySelector('.minb'), mn ? '+' : '&minus;');
+      el.spec.querySelector('.minb').title = mn ? 'Show the bar' : 'Fold the bar';
     }
     // resources
     const rs = el.bottom.querySelectorAll('.res');
@@ -339,14 +356,14 @@ const HUD = (() => {
       g.fillRect(a - 2.6, b - 2.6, 5.2, 5.2);
     }
     // fog
-    const P = G.players[0], gw = m.w / FOG.C;
+    const P = G.players[ui.fogSide || 0], gw = m.w / FOG.C;
     g.fillStyle = 'rgba(10,12,16,.45)';
-    for (let i = 0; i < P.vis.length; i++) if (P.vis[i] !== 2) { const x = (i % gw) * FOG.C + 2, y = ((i / gw) | 0) * FOG.C + 2; const [a, b] = mmToScreen(x, y); g.fillRect(a - 2.1, b - 2.1, 4.2, 4.2); }
+    if (!ui.noFog) for (let i = 0; i < P.vis.length; i++) if (P.vis[i] !== 2) { const x = (i % gw) * FOG.C + 2, y = ((i / gw) | 0) * FOG.C + 2; const [a, b] = mmToScreen(x, y); g.fillRect(a - 2.1, b - 2.1, 4.2, 4.2); }
     // points (always shown, even in fog)
     for (const p of m.points) { const [a, b] = mmToScreen(p.x, p.y); RENDER.pointIcon(g, p, a, b, .55, null); }
     // units
     for (const e of G.ents) {
-      if (e.dead || (e.owner !== 0 && !ui.noFog && !FOG.visible(G, 0, e))) continue;
+      if (e.dead || !FOG.shown(G, e)) continue;
       const [a, b] = mmToScreen(e.x, e.y);
       g.fillStyle = e.owner === 0 ? (ui.selected.has(e.id) ? '#fff' : '#5ab4ff') : '#ff5a4a';
       if (e.type === 'building') g.fillRect(a - 3.5, b - 3.5, 7, 7); else if (e.type === 'vehicle') g.fillRect(a - 2.5, b - 2.5, 5, 5); else { g.beginPath(); g.arc(a, b, 2.2, 0, 7); g.fill(); }
@@ -374,27 +391,26 @@ const HUD = (() => {
   const mouse = { x: -1, y: -1, down: false, drag: null, rdown: null, inCanvas: false, moved: false };
   /* the house under the cursor: test the ground point and the points behind the walls and roof as drawn */
   function houseAtScreen(sx, sy) {
-    for (const z of [0, 1.5, 3, 4.5, 6]) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .3); if (h && FOG.explored(G, 0, h.x, h.y)) return h; }
+    for (const z of [0, 1.5, 3, 4.5, 6]) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .3); if (h && FOG.shownAt(G, h.x, h.y)) return h; }
     return null;
   }
   /* an abandoned gun or dropped weapon under the cursor */
   function dropAt(sx, sy) {
     let best = null, bd = (ui.touch ? 40 : 26) ** 2;
-    for (const d of G.drops || []) { if (!FOG.explored(G, 0, d.x, d.y)) continue; const [x, y] = RENDER.toScreen(d.x, d.y, .5); const q = (x - sx) ** 2 + (y - sy) ** 2; if (q < bd) { bd = q; best = d; } }
+    for (const d of G.drops || []) { if (!FOG.shownAt(G, d.x, d.y)) continue; const [x, y] = RENDER.toScreen(d.x, d.y, .5); const q = (x - sx) ** 2 + (y - sy) ** 2; if (q < bd) { bd = q; best = d; } }
     return best;
   }
   function entAt(sx, sy) {
     let best = null, bd = ui.touch ? 46 * 46 : 30 * 30;
     for (const e of G.ents) {
       if (e.dead) continue;
-      if (e.owner !== 0 && e.type !== 'building' && !ui.noFog && !FOG.visible(G, 0, e)) continue;
-      if (e.type === 'building' && e.owner !== 0 && !ui.noFog && !FOG.explored(G, 0, e.x, e.y)) continue;
+      if (!FOG.shown(G, e)) continue;
       if (e.type === 'squad') { for (const m of e.models) { if (!m.alive) continue; const [x, y] = RENDER.toScreen(m.x, m.y, .8); const d = (x - sx) ** 2 + (y - sy) ** 2; if (d < bd * .5) { bd = d * 2; best = e; } } if (e.crew && e.crew.state !== 'packed') { const [x, y] = RENDER.toScreen(e.crew.x, e.crew.y, .5); const d = (x - sx) ** 2 + (y - sy) ** 2; if (d < bd) { bd = d; best = e; } } }
       else if (e.type === 'vehicle') { const [x, y] = RENDER.toScreen(e.x, e.y, 1); const d = (x - sx) ** 2 + (y - sy) ** 2, r = e.def.length * 12 * RENDER.cam.k; if (d < Math.max(bd, r * r)) { bd = d; best = e; } }
       else { const [wx, wy] = RENDER.toWorld(sx, sy); if (Math.abs(wx - e.x) < e.w / 2 + 1 && Math.abs(wy - e.y) < e.d / 2 + 1) { best = e; bd = 0; } }
     }
     // a click on a garrisoned house picks the squad inside (yours, or an enemy you can see)
-    if (!best) { const h = houseAtScreen(sx, sy), o = h && h.occ != null ? G.byId.get(h.occ) : null; if (o && !o.dead && (o.owner === 0 || FOG.visible(G, 0, o))) best = o; }
+    if (!best) { const h = houseAtScreen(sx, sy), o = h && h.occ != null ? G.byId.get(h.occ) : null; if (o && !o.dead && FOG.shown(G, o)) best = o; }
     return best;
   }
   function pointAt(sx, sy) { const [wx, wy] = RENDER.toWorld(sx, sy); for (const p of G.map.points) { const [x, y] = RENDER.toScreen(p.x, p.y, 8.5); if ((x - sx) ** 2 + (y - sy) ** 2 < 15 * 15 || U.dist2(wx, wy, p.x, p.y) < 2.5 * 2.5) return p; } return null; }

@@ -4,7 +4,7 @@
    loads in the middle of a fight. The main menu draws that battlefield behind it with a slow camera drift. */
 const MAIN = (() => {
   const ART = (window.ART_BASE || '../art/');
-  let G = null, BG = null, lib = {}, layout = null, assets = null, inMenu = true, last = 0, acc = 0, hudT = 0, mmT = 0, fogT = -1, speed = 1, side = 'us';
+  let G = null, BG = null, lib = {}, layout = null, assets = null, inMenu = true, last = 0, acc = 0, hudT = 0, mmT = 0, fogT = -1, fogSlot = 0, speed = 1, side = 'us';
   let screen = 'boot', back = 'main', ready = false, mode = 'skirmish';
   const $ = s => document.querySelector(s);
   const CINE = { selected: new Set(), hover: null, noFog: true, cinematic: true };
@@ -63,7 +63,7 @@ const MAIN = (() => {
 
   /* ---------------- a match ---------------- */
   /* mode: 'skirmish' (1v1 against the AI), 'sandbox' (the same with 10,000 of everything, for testing)
-     or 'spectate' (AI against AI, no fog, no orders) */
+     or 'spectate' (AI against AI, no orders; fog off to start, the bar under the score turns it on for either side) */
   function start(s, m) {
     if (!ready) return;
     side = s || side; mode = m || mode;
@@ -78,17 +78,17 @@ const MAIN = (() => {
       RENDER.init(canvas, lib, G);
       HUD.init(G, canvas);
       HUD.ui.selected = spec ? new Set() : new Set(G.ents.filter(e => e.owner === 0 && e.type === 'squad').map(e => e.id));
-      HUD.ui.paused = false; HUD.ui.noFog = spec; HUD.ui.mode = null;
+      HUD.ui.paused = false; HUD.ui.noFog = spec; HUD.ui.fogSide = 0; HUD.ui.mode = null;
       resize();
       applyLayout.zoomed = false; applyLayout();
       show('game');
-      if (spec) { RENDER.cam.x = G.map.w / 2; RENDER.cam.y = G.map.h / 2; HUD.flash('Watching the AI: no fog, no orders. Pick a speed under the score; Space pauses.'); }
+      if (spec) { RENDER.cam.x = G.map.w / 2; RENDER.cam.y = G.map.h / 2; HUD.flash('Watching the AI. Speed and fog are under the score; − folds that bar. Space pauses.'); }
       else if (mode === 'sandbox') HUD.flash('Sandbox: 10,000 manpower, munitions and fuel to test with.');
       else HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
     }, 30);
   }
   function toMain() {
-    G = null; window.G = null; HUD.ui.paused = false; HUD.ui.noFog = false; speed = +set.speed || 1;
+    G = null; window.G = null; HUD.ui.paused = false; HUD.ui.noFog = false; HUD.ui.fogSide = 0; speed = +set.speed || 1;
     document.body.classList.remove('spectate');
     RENDER.init($('#view'), lib, BG);
     RENDER.cam.k = .62; RENDER.cam.x = 70; RENDER.cam.y = 150;
@@ -130,7 +130,8 @@ const MAIN = (() => {
       if (n > 8) acc = 0;
     }
     HUD.tick(dt);
-    if (G.t !== fogT && ((G.t * 4) | 0) !== ((fogT * 4) | 0)) { RENDER.updateFogCanvas(G, 0); fogT = G.t; }
+    if ((HUD.ui.fogSide || 0) !== fogSlot) { fogSlot = HUD.ui.fogSide || 0; fogT = -1; }
+    if (G.t !== fogT && ((G.t * 4) | 0) !== ((fogT * 4) | 0)) { RENDER.updateFogCanvas(G, fogSlot); fogT = G.t; }
     const a = inMenu || HUD.ui.paused || G.over ? 1 : Math.min(1, acc / SIM.DT);
     lerpIn(G, a); try { RENDER.frame(G, HUD.ui, a); } finally { lerpOut(G); }
     HUD.drawSelectBox();

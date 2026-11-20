@@ -13,6 +13,7 @@ What it runs, in order (it stops at the first failure and says which):
   4. the build                              tools/build_web.py dist             (fails if any art file is missing)
   5. the build in a browser, PC and phone   loads with no page errors and all its art, a skirmish starts as each side
   6. real input in the browser              game/test/flow.py de, game/test/mobile.py    no page errors
+     Watch AI fog button and folding bar   game/test/spectate.py (PC and phone)          spectate ok
 No local web server is needed: the browser is answered from the files on disk.
 """
 import asyncio, mimetypes, os, runpy, subprocess, sys, time
@@ -98,8 +99,9 @@ def browser_stage():
 def input_stage():
     """The repo's real-input browser tests, each in its own process, answered from the repository folder."""
     good = True
-    for script, args in (('game/test/flow.py', ['de']), ('game/test/mobile.py', [])):
-        good &= run(f'{script} {" ".join(args)}'.strip(), [sys.executable, __file__, '--offline', script] + args, ok='no page errors', timeout=900)
+    for script, args, ok in (('game/test/flow.py', ['de'], 'no page errors'), ('game/test/mobile.py', [], 'no page errors'),
+                             ('game/test/spectate.py', [], 'spectate ok')):
+        good &= run(f'{script} {" ".join(args)}'.strip(), [sys.executable, __file__, '--offline', script] + args, ok=ok, timeout=900)
     return good
 
 
