@@ -60,6 +60,13 @@ const HUD = (() => {
   function buildingIcon(id) {
     const key = 'b:' + id; if (iconCache[key]) return iconCache[key];
     const def = D.BUILDINGS[id], side = def.side, c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d');
+    // the building's own sprite, with its glyph in a corner so the button still reads at a glance
+    const owner = Math.max(0, G.players.findIndex(P => P.side === side));
+    if (RENDER.buildingPortrait(id, owner, c)) {
+      g.fillStyle = 'rgba(12,12,10,.8)'; g.beginPath(); g.arc(13, 13, 11, 0, Math.PI * 2); g.fill();
+      g.save(); g.translate(13, 13); g.scale(.62, .62); g.fillStyle = g.strokeStyle = '#eee'; (RENDER.GLYPHS[def.glyph] || RENDER.GLYPHS.house)(g); g.restore();
+      return iconCache[key] = c.toDataURL();
+    }
     g.fillStyle = side === 'us' ? '#7c7a5e' : '#77705f'; g.beginPath(); g.moveTo(8, 34); g.lineTo(32, 46); g.lineTo(56, 34); g.lineTo(56, 22); g.lineTo(32, 34); g.lineTo(8, 22); g.closePath(); g.fill();
     g.fillStyle = side === 'us' ? '#58603e' : '#5b5145'; g.beginPath(); g.moveTo(8, 22); g.lineTo(32, 10); g.lineTo(56, 22); g.lineTo(32, 34); g.closePath(); g.fill();
     g.save(); g.translate(32, 25); g.scale(1.1, 1.1); g.fillStyle = g.strokeStyle = '#eee'; (RENDER.GLYPHS[def.glyph] || RENDER.GLYPHS.house)(g); g.restore();
@@ -249,7 +256,7 @@ const HUD = (() => {
     units.sort((a, b) => (a.type === 'vehicle' ? 0 : 1) - (b.type === 'vehicle' ? 0 : 1) || a.id - b.id);
     const html = units.map(e => {
       const n = e.type === 'squad' ? e.models.filter(m => m.alive).length : '';
-      const st = e.type === 'squad' ? (e.retreating ? '<em class="ret"></em>' : e.suppState ? '<em class="sup">!</em>' : G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '') : (G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '');
+      const ss = RENDER.squadState(e), st = ss ? `<em class="st" title="${RENDER.STATE[ss].label.toLowerCase()}"><img src="${RENDER.badgeURL(ss)}"></em>` : G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '';
       const hpf = e.type === 'vehicle' ? e.hp / e.maxHp : e.models.reduce((a, m) => a + (m.alive ? m.hp : 0), 0) / (e.def.hp * e.maxModels);
       return `<div class="ru ${ui.selected.has(e.id) ? 'sel' : ''}" data-id="${e.id}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph)}">${n !== '' ? `<b>${n}</b>` : ''}${e.vet ? `<u>${'&#9733;'.repeat(e.vet)}</u>` : ''}${groupOf(e.id) ? `<span class="grp">${groupOf(e.id)}</span>` : ''}${st}<i style="width:${Math.round(hpf * 100)}%;background:${RENDER.HEALTH_COL(hpf)}"></i></div>`;
     }).join('');
@@ -293,7 +300,8 @@ const HUD = (() => {
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
     put(body, name + `<div class="role">${e.def.role}</div>${clsLine(e.def)}${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
-      `<div class="line">${strength}${(() => { const h = MAP.hAt(G.map, e.x, e.y); return h >= 1.5 ? `<span class="elev" title="Elevation: sees further; from 2.5 m above a target it fires over the target's cover">&#9650; ${h.toFixed(0)} m</span>` : ''; })()}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state">${state}</span>` : ''}</div>` +
+      `<div class="line">${strength}${(() => { const h = MAP.hAt(G.map, e.x, e.y); return h >= 1.5 ? `<span class="elev" title="Elevation: sees further; from 2.5 m above a target it fires over the target's cover">&#9650; ${h.toFixed(0)} m</span>` : ''; })()}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state"${RENDER.squadState(e) ? ` style="color:${RENDER.STATE[RENDER.squadState(e)].col}"><img class="sb" src="${RENDER.badgeURL(RENDER.squadState(e))}">` : '>'}${state}</span>` : ''}</div>` +
+      (e.type === 'squad' && !e.retreating && e.supp > .03 ? `<div class="supp" title="Suppression: past the first mark the squad is suppressed (slower, less accurate), past the second it is pinned (only a retreat order works). It wears off out of fire, faster in cover."><span>Suppression</span><b><i style="width:${Math.round(Math.min(1, e.supp / D.SUPP.cap) * 100)}%;background:${e.suppState === 2 ? RENDER.STATE.pinned.fill : e.suppState === 1 ? RENDER.STATE.suppressed.fill : '#c9a865'}"></i><u style="left:${D.SUPP.suppressed / D.SUPP.cap * 100}%"></u><u style="left:${D.SUPP.pinned / D.SUPP.cap * 100}%"></u></b></div>` : '') +
       `<div class="weap">${weapons.join(' &middot; ')}</div>` +
       (e.type === 'vehicle' ? `<div class="armor">Armour ${e.def.armor.join(' / ')} (front / side / rear)</div>` : '') +
       `<div class="hp"><i style="width:${Math.round(hpf * 100)}%;background:${RENDER.HEALTH_COL(hpf)}"></i></div>`);
@@ -301,6 +309,7 @@ const HUD = (() => {
   }
   function drawBuildingPortrait(cv, b) {
     const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+    if (RENDER.buildingPortrait(b.defId, b.owner, cv, b.built < 1 ? (b.built < .5 ? 'build33' : 'build66') : b.hp < b.maxHp * .5 ? 'damaged' : 'normal')) return;
     const im = new Image(); im.onload = () => g.drawImage(im, 0, 0, cv.width, cv.height); im.src = buildingIcon(b.defId);
   }
   function updateCard() {

@@ -30,8 +30,8 @@ for (let g = 0; g < games; g++) {
       if (e.type === 'squad') {
         for (const m of e.models) if (m.alive) {
           if (!isFinite(m.x) || !isFinite(m.hp)) note('model NaN', e.defId);
-          const k = e.id + ':' + m.i;   // consecutive seconds inside an obstacle (men standing in a fighting position they hold are meant to be)
-          if (!MAP.walkable(nav.inf, G.map, m.x, m.y) && !(e.crew && e.crew.state !== 'packed') && !(e.garrison != null && G.map.houses[e.garrison].pit)) { still.set(k, (still.get(k) || 0) + 1); if (still.get(k) === 8) note('model stuck in blocked ground 8s', e.defId + ' at ' + m.x.toFixed(1) + ',' + m.y.toFixed(1)); } else still.delete(k);
+          const k = e.id + ':' + m.i;   // consecutive seconds inside an obstacle (men standing in a fighting position they hold are meant to be, and so are the men at a house's windows over its outside stair)
+          if (!MAP.walkable(nav.inf, G.map, m.x, m.y) && !(e.crew && e.crew.state !== 'packed') && !(e.garrison != null && (G.map.houses[e.garrison].pit || G.map.houses[e.garrison].stair))) { still.set(k, (still.get(k) || 0) + 1); if (still.get(k) === 8) note('model stuck in blocked ground 8s', e.defId + ' at ' + m.x.toFixed(1) + ',' + m.y.toFixed(1)); } else still.delete(k);
           if (Math.hypot(m.x - e.x, m.y - e.y) > 30 && !(e.crew && e.crew.state !== 'packed')) note('model strayed > 30 m from squad', e.defId);
         }
         // a squad with a path that has not moved for 20 s

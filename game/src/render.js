@@ -138,6 +138,39 @@ const RENDER = (() => {
     R.groundKey = G.map.seed + ':' + G.map.w;
     if (!R.tiles.ground_dry_grass) { R.groundS = 8; buildGroundFlat(G); } else buildGroundPainted(G);
     shadeGround(G, R.ground, R.groundS);
+    buildOuter(G);
+  }
+  /* the land past the map edge: the same dry grass carried on, dimmed and fading into the background, so the map
+     sits in a landscape instead of a dark void (CoH3 shows the terrain beyond the play area, greyed out) */
+  const OUTER_M = 90, OUTER_S = 5;
+  function buildOuter(G) {
+    const m = G.map, S = OUTER_S, P = OUTER_M, W = (m.w + 2 * P) * S, H = (m.h + 2 * P) * S, c = canvas(W, H), g = c.getContext('2d');
+    const tile = (n, px) => { const im = R.tiles[n]; if (!im) return null; const t = canvas(px, px); t.getContext('2d').drawImage(im, 0, 0, px, px); return g.createPattern(t, 'repeat'); };
+    const grass = tile('ground_dry_grass', Math.round((TILE_M.ground_dry_grass || TILE_M._) * S));
+    g.fillStyle = grass || '#8a7a52'; g.fillRect(0, 0, W, H);
+    const dirt = tile('ground_dirt', Math.round((TILE_M.ground_dirt || TILE_M._) * S));
+    if (dirt) {                                          // a few broad dirt patches so the repeat doesn't read
+      g.globalAlpha = .35; g.fillStyle = dirt;
+      for (let i = 0; i < 26; i++) { const a = i * 2.39996, r = (m.w / 2 + P * .55) * S, x = W / 2 + Math.cos(a) * r * (.9 + .25 * Math.sin(i * 1.7)), y = H / 2 + Math.sin(a) * r * (.9 + .25 * Math.cos(i * 1.3)); g.beginPath(); g.ellipse(x, y, (14 + (i * 7) % 16) * S, (9 + (i * 5) % 11) * S, a, 0, U.TAU); g.fill(); }
+      g.globalAlpha = 1;
+    }
+    // the roads that leave the map carry on out of it, along their last stretch
+    const road = tile('ground_white_road', Math.round((TILE_M.ground_white_road || TILE_M._) * S));
+    if (road) {
+      g.strokeStyle = road; g.lineWidth = 5.6 * S; g.lineCap = 'butt';
+      for (const rd of m.roads) for (const [a, b] of [[rd[0], rd[1]], [rd[rd.length - 1], rd[rd.length - 2]]]) {
+        if (Math.min(a[0], a[1], m.w - a[0], m.h - a[1]) > 20) continue;                 // ends inside the map
+        const dx = a[0] - b[0], dy = a[1] - b[1], L = Math.hypot(dx, dy);
+        g.beginPath(); g.moveTo((b[0] + P) * S, (b[1] + P) * S); g.lineTo((a[0] + dx / L * 200 + P) * S, (a[1] + dy / L * 200 + P) * S); g.stroke();
+      }
+    }
+    g.fillStyle = 'rgba(26,28,22,.42)'; g.fillRect(0, 0, W, H);                 // out of play: dimmed
+    // fade to the background colour with distance from the map edge
+    const fade = (x0, y0, x1, y1, rx, ry, rw, rh) => { const gr = g.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, 'rgba(32,35,28,0)'); gr.addColorStop(1, 'rgba(32,35,28,1)'); g.fillStyle = gr; g.fillRect(rx, ry, rw, rh); };
+    const e0 = P * S, near = e0 * .25;
+    fade(0, e0 - near, 0, 0, 0, 0, W, e0 - near); fade(0, H - e0 + near, 0, H, 0, H - e0 + near, W, e0 - near);
+    fade(e0 - near, 0, 0, 0, 0, 0, e0 - near, H); fade(W - e0 + near, 0, W, 0, W - e0 + near, 0, e0 - near, H);
+    R.outer = c;
   }
   function buildGroundPainted(G) {
     const m = G.map, S = R.groundS = 12, W = m.w * S, H = m.h * S, c = canvas(W, H), g = c.getContext('2d');
@@ -436,6 +469,7 @@ const RENDER = (() => {
     FOG.view.all = !!ui.noFog; FOG.view.slot = ui.fogSide || 0;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.fillStyle = '#20231c'; c.fillRect(0, 0, R.W, R.H);
+    if (R.outer) drawFlat(c, k, R.outer, OUTER_S, OUTER_M);
     // ground: tilted tiles that follow the terrain, back to front (texture px at R.groundS px a metre)
     drawFlat(c, k, R.ground, R.groundS || 8);
     if (ui.heightView) { if (R.heightKey !== G.map.seed + ':' + G.map.w) buildHeightView(G); drawFlat(c, k, R.heightC, 4); }
@@ -457,6 +491,7 @@ const RENDER = (() => {
     for (const cr of G.map.craters) { if (!vis(cr.x, cr.y, 80)) continue; const [sx, sy] = toScreen(cr.x, cr.y); c.beginPath(); c.ellipse(sx, sy - 1, cr.r * 27 * k, cr.r * 13 * k, 0, 0, U.TAU); c.stroke(); }
     drawSectorLines(G, c, k);
     drawPoints(G, c, k);
+    drawSquadStates(G, c, k);
     // shadows of everything that moves, then all objects back to front
     const list = [];
     R.under = [];                                         // squads and vehicles shown this frame (trees over them fade)
@@ -503,8 +538,8 @@ const RENDER = (() => {
   }
 
   /* a ground-plane image (S px a metre) with the iso transform, in one draw */
-  function drawFlat(c, k, img, S) {
-    const [ox, oy] = toScreen(0, 0);
+  function drawFlat(c, k, img, S, off) {
+    const [ox, oy] = toScreen(-(off || 0), -(off || 0));
     c.setTransform(PXM * k / S, PXM * .5 * k / S, -PXM * k / S, PXM * .5 * k / S, ox, oy);
     c.drawImage(img, 0, 0);
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -956,7 +991,7 @@ const RENDER = (() => {
       const full = FULL.has(key.slice(3));
       let pose = null, s = null;
       const aim = deployed && crewUnit ? sq.crew.heading + rel * Math.PI / 180 : (m.since < 3 ? m.aim : m.heading);
-      if (full) pose = UnitKit.troopPose(lib, mem, { x: m.x * PXM * k, y: m.y * PXM * k, aim, t: G.t, since: m.since, inside: false, id: m.i + sq.id }, k);
+      if (full) pose = UnitKit.troopPose(lib, mem, { x: m.x * PXM * k, y: m.y * PXM * k, aim, t: G.t, since: sq.retreating ? 99 : m.since, inside: false, id: m.i + sq.id }, k);   // retreating men run facing home, not back-pedalling
       else {
         const moving = m.vx > .4, clips = lib.m.clips;
         mem.d = (mem.d || 0) + (moving && mem.lx != null ? Math.min(2, Math.hypot(m.x - mem.lx, m.y - mem.ly)) : 0); mem.lx = m.x; mem.ly = m.y;
@@ -1178,16 +1213,80 @@ const RENDER = (() => {
       // cover shield
       const cov = COMBAT.squadCover(G, e);
       if (cov !== 'none') { c.fillStyle = DATA.COVER[cov].colour; c.beginPath(); c.moveTo(sx - 21 * s, sy + 6 * s); c.lineTo(sx - 11 * s, sy + 6 * s); c.lineTo(sx - 12 * s, sy + 13 * s); c.lineTo(sx - 16 * s, sy + 16 * s); c.lineTo(sx - 20 * s, sy + 13 * s); c.closePath(); c.fill(); }
-      // suppression / pinned / retreat
-      if (e.retreating) { c.fillStyle = '#ffcf5a'; c.beginPath(); c.moveTo(sx + 12, sy + 10); c.lineTo(sx + 20, sy + 4); c.lineTo(sx + 20, sy + 16); c.closePath(); c.fill(); }
-      else if (e.suppState) { c.fillStyle = e.suppState === 2 ? '#ff4a3a' : '#ffb03a'; c.font = '800 12px Inter, system-ui'; c.fillText(e.suppState === 2 ? '!!' : '!', sx + 11, sy + 14); }
-      if (e.camo) tag(c, 'CAMO', sx, sy + 20, '#bfe8b0');
+      // state: a badge on the icon's right, a suppression meter under it, then the tags (one under another)
+      let ty = sy + 20;
+      const st = squadState(e);
+      if (st) stateBadge(c, st, sx + 18, sy - 8, G.t);
+      if (!e.retreating && e.supp > .03) { suppMeter(c, e.supp, e.suppState, sx, sy + 16); ty += 6; }
+      if (st) { tag(c, STATE[st].label, sx, ty, STATE[st].col); ty += 13; }
+      if (e.camo) { tag(c, 'CAMO', sx, ty, '#bfe8b0'); ty += 13; }
       if (e.crew && (e.crew.state === 'setting' || e.crew.state === 'tearing')) { c.strokeStyle = '#ffd34d'; c.lineWidth = 2; c.beginPath(); c.arc(sx, sy - 2, 18 * s, -Math.PI / 2, -Math.PI / 2 + U.TAU * (1 - e.crew.t / ((SIM.weaponOf(e).setup || 2.5)))); c.stroke(); }
-      if (e.building) tag(c, e.order.type === 'repair' ? 'REPAIRING' : 'BUILDING', sx, sy + 20, '#cfe9ff');
+      if (e.building) tag(c, e.order.type === 'repair' ? 'REPAIRING' : 'BUILDING', sx, ty, '#cfe9ff');
     }
     // (health is drawn in the icon above; nothing under it)
     // control group
     if (e.owner === 0 && ui.groupOf) { const g = ui.groupOf(e.id); if (g) { c.fillStyle = '#111'; c.fillRect(sx - 6, sy - 40, 12, 13); c.fillStyle = '#eee'; c.font = '700 10px Inter'; c.textAlign = 'center'; c.fillText(g, sx, sy - 30); c.textAlign = 'left'; } }
+  }
+  /* ---- squad states: retreating, pinned, suppressed. One look for each, used on the field, the icon and the HUD ---- */
+  const STATE = {
+    retreat: { label: 'RETREATING', col: '#ffd66a', fill: '#e8b23a', ground: 'rgba(255,207,90,' },
+    pinned: { label: 'PINNED', col: '#ff8a7a', fill: '#e2402f', ground: 'rgba(235,60,40,' },
+    suppressed: { label: 'SUPPRESSED', col: '#ffc070', fill: '#f08a24', ground: 'rgba(240,138,36,' },
+  };
+  const squadState = e => e.type !== 'squad' ? null : e.retreating ? 'retreat' : e.suppState === 2 ? 'pinned' : e.suppState === 1 ? 'suppressed' : null;
+  R.squadState = squadState; R.STATE = STATE;
+  /* a round badge: retreat = a double chevron pointing back; suppressed = one chevron down (heads down);
+     pinned = two chevrons down onto a ground line (flat on the ground), pulsing */
+  function stateBadge(c, st, x, y, t) {
+    const S = STATE[st], r = st === 'pinned' ? 8.5 + Math.sin(t * 7) * .9 : 8;
+    c.fillStyle = 'rgba(10,10,8,.85)'; c.beginPath(); c.arc(x, y, r + 1.6, 0, U.TAU); c.fill();
+    c.fillStyle = S.fill; c.beginPath(); c.arc(x, y, r, 0, U.TAU); c.fill();
+    c.strokeStyle = '#17130c'; c.lineWidth = 1.8; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath();
+    if (st === 'retreat') { for (const o of [-2.2, 2.2]) { c.moveTo(x + o + 1.6, y - 3.4); c.lineTo(x + o - 1.6, y); c.lineTo(x + o + 1.6, y + 3.4); } }
+    else if (st === 'suppressed') { c.moveTo(x - 3.4, y - 1.6); c.lineTo(x, y + 1.8); c.lineTo(x + 3.4, y - 1.6); }
+    else { for (const o of [-3.4, -.4]) { c.moveTo(x - 3.2, y + o); c.lineTo(x, y + o + 2.4); c.lineTo(x + 3.2, y + o); } c.moveTo(x - 4, y + 4); c.lineTo(x + 4, y + 4); }
+    c.stroke(); c.lineCap = 'butt'; c.lineJoin = 'miter';
+  }
+  R.stateBadge = stateBadge;
+  /* the same badge as an image for the HUD (roster tiles, unit card) */
+  const badgeURLs = {};
+  R.badgeURL = st => badgeURLs[st] || (badgeURLs[st] = (() => { const cv = canvas(40, 40), g = cv.getContext('2d'); g.scale(2, 2); stateBadge(g, st, 10, 10, 0); return cv.toDataURL(); })());
+  /* suppression meter: fills with the squad's suppression; ticks where it becomes suppressed and where it is pinned */
+  function suppMeter(c, v, state, x, y) {
+    const w = 28, h = 4, f = Math.min(1, v / DATA.SUPP.cap);
+    c.fillStyle = 'rgba(10,10,8,.85)'; c.fillRect(x - w / 2 - 1, y - 1, w + 2, h + 2);
+    c.fillStyle = state === 2 ? STATE.pinned.fill : state === 1 ? STATE.suppressed.fill : '#c9a865'; c.fillRect(x - w / 2, y, w * f, h);
+    c.fillStyle = '#f3efe4'; for (const th of [DATA.SUPP.suppressed, DATA.SUPP.pinned]) c.fillRect(x - w / 2 + w * th / DATA.SUPP.cap - .5, y - 1, 1, h + 2);
+  }
+  /* on the ground under the men: a red patch while pinned (as in CoH, the ground round a pinned squad turns red), a
+     softer orange one while suppressed; and for the viewing side's retreating squads the way home, in gold, selected
+     or not, with chevrons pointing along it */
+  function drawSquadStates(G, c, k) {
+    for (const e of G.ents) {
+      if (e.dead || e.type !== 'squad' || !FOG.shown(G, e)) continue;
+      const st = squadState(e); if (!st) continue;
+      if (st !== 'retreat') {
+        const a = st === 'pinned' ? .42 + Math.sin(G.t * 7) * .1 : .3;
+        c.fillStyle = STATE[st].ground + a + ')';
+        for (const m of e.models) { if (!m.alive) continue; const [sx, sy] = toScreen(m.x, m.y); c.beginPath(); c.ellipse(sx, sy, 18 * k, 9 * k, 0, 0, U.TAU); c.fill(); }
+        continue;
+      }
+      if (!(FOG.view.all || e.owner === FOG.view.slot) || !e.path || !e.path.length) continue;
+      const pts = [[e.x, e.y], ...e.path.map(p => [p.x, p.y])].map(([x, y]) => toScreen(x, y));
+      c.strokeStyle = 'rgba(255,207,90,.55)'; c.lineWidth = 2.2 * k; c.setLineDash([7 * k, 6 * k]); c.lineDashOffset = -G.t * 14 * k;
+      c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.stroke(); c.setLineDash([]); c.lineDashOffset = 0;
+      // a chevron every ~6 m along the way
+      c.strokeStyle = 'rgba(255,214,106,.9)'; c.lineWidth = 2 * k; let acc = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, ay] = pts[i - 1], [bx, by] = pts[i], L = Math.hypot(bx - ax, by - ay); if (L < 1e-3) continue;
+        const ux = (bx - ax) / L, uy = (by - ay) / L, step = 6 * 22 * k;
+        for (let d = step - acc; d < L; d += step) {
+          const px = ax + ux * d, py = ay + uy * d, q = 5 * k;
+          c.beginPath(); c.moveTo(px - ux * q - uy * q, py - uy * q + ux * q); c.lineTo(px, py); c.lineTo(px - ux * q + uy * q, py - uy * q - ux * q); c.stroke();
+        }
+        acc = (acc + L) % step;
+      }
+    }
   }
   /* a small label under a unit icon, in the same dark plate as the NO INCOME tag */
   function tag(c, text, x, y, col) {
@@ -1200,6 +1299,8 @@ const RENDER = (() => {
       const def = DATA.BUILDINGS[g.id], ok = !g.err;
       c.fillStyle = ok ? 'rgba(90,220,140,.25)' : 'rgba(255,80,60,.25)'; c.strokeStyle = ok ? '#6f6' : '#f55'; c.lineWidth = 2;
       c.beginPath(); [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b], i) => { const [sx, sy] = toScreen(g.x + a * def.size[0] / 2, g.y + b * def.size[1] / 2); i ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }); c.closePath(); c.fill(); c.stroke();
+      // the finished building itself, see-through, so the player sees what goes where (the same sprite the game draws)
+      if (R.lib['base_' + g.id]) { const [nx, ny] = toScreen(g.x + def.size[0] / 2, g.y + def.size[1] / 2); c.globalAlpha = ok ? .6 : .35; ArtKit.drawStatic(c, R.lib, 'base_' + g.id, 'normal', nx, ny, k, 0, 0); c.globalAlpha = 1; }
       if (g.err) { const [sx, sy] = toScreen(g.x, g.y, 2); c.fillStyle = '#fbb'; c.font = '600 13px Inter'; c.textAlign = 'center'; c.fillText(g.err, sx, sy); c.textAlign = 'left'; }
     } else if (g.kind === 'pit') {
       const ok = !g.err, [sx, sy] = toScreen(g.x, g.y);
@@ -1240,6 +1341,17 @@ const RENDER = (() => {
     ArtKit.drawUnit(g, R.lib, key, s, cv.width / 2, cv.height * (infantry ? .9 : .66), sc);
     return true;
   }
+
+  /* a base building's sprite fitted into a canvas (HUD portrait, build buttons); false if its art isn't loaded */
+  function buildingPortrait(id, owner, cv, state) {
+    const key = 'base_' + id, o = R.lib[key]; if (!o) return false;
+    const m = o.m.states[state || 'normal'] || o.m.states.normal, a = m.near_corner || m.origin;
+    const g = cv.getContext('2d'), sc = Math.min(cv.width / m.size[0], cv.height / m.size[1]) * .96;
+    const x = (cv.width - m.size[0] * sc) / 2 + a[0] * sc, y = (cv.height - m.size[1] * sc) / 2 + a[1] * sc;
+    ArtKit.drawStatic(g, R.lib, key, state || 'normal', x, y, sc, 0, owner);
+    return true;
+  }
+  R.buildingPortrait = buildingPortrait;
 
   /* Load-time GPU warm-up: draw every sprite page once, off screen, so each one is decoded and uploaded while the
      loading bar is up instead of the first time that unit appears in a fight (a big tank sheet is ~25 MB). */
