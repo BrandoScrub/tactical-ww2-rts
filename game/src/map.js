@@ -3,7 +3,7 @@
    down-left, so the two bases sit at the left and right of the view and the victory points run down the middle.
 
    Grids are 1 m cells. Flags in `block`: 1 stops infantry, 2 stops vehicles, 4 blocks sight. `area` holds ground
-   cover: 0 none, 1 light, 2 heavy, 3 negative (open road). Cover objects (walls, sandbags, wire, tank traps) are
+   cover: 0 none, 1 light, 2 heavy, 3 negative (none on this map; roads are open ground). Cover objects (walls, sandbags, wire, tank traps) are
    segments, kept in a coarse bucket grid for fast lookup; their cover only counts against fire that crosses them. */
 const MAP = (() => {
   const W = 200, H = 200, SEC = 2;                   // sector grid: 2 m cells
@@ -108,6 +108,7 @@ const MAP = (() => {
     // the farmhouse art for each footprint (tools/build_scenery.py; the long side is the ridge). '_r' is the same house
     // turned so its ridge runs along y; square ones use it for the mirrored copy, so the two halves differ.
     const HOUSE_ART = { '9x7': 'farmhouse_stair', '6x6': 'cottage', '8x6': 'farmhouse_long', '9x6': 'farmhouse_tower', '7x6': 'farmhouse_small', '7x7': 'farmhouse_square' };
+    const STAIR_ART = new Set(['farmhouse_stair', 'farmhouse_tower', 'farmhouse_long']);
     const addHouse = (h, mirror) => {
       const house = { id: m.houses.length, x: h.x, y: h.y, w: h.w, d: h.d, hp: 1200, maxHp: 1200, occ: null, dead: false, roof: R.pick(['tile', 'tile', 'slate']), wall: R.pick(['stucco', 'stone', 'stucco']) };
       const art = HOUSE_ART[Math.max(h.w, h.d) + 'x' + Math.min(h.w, h.d)];
@@ -115,6 +116,18 @@ const MAP = (() => {
       m.houses.push(house); m.flatPad(h.x, h.y, h.w, h.d);
       for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
         if (inside(x, y)) m.block[idx(x, y)] |= BI | BV | BL;
+      // the outside stair (models/scenery.py farmhouse(stair=True)) stands 1.2 m out from the long +y wall, from 0.4 m
+      // to w*0.62 + 1.4 m along it; turned houses ('_r') carry it on +x, running from the far end. It blocks men (not
+      // sight) and stays standing when the house collapses, as in the ruin art. Vehicles already keep 2 m off the walls;
+      // blocking them too grew every stair house by another 2 m for vehicles and squeezed the lanes between houses.
+      if (art && STAIR_ART.has(art)) {
+        const L = Math.max(h.w, h.d), a0 = .4, a1 = L * .62 + 1.4;
+        const r = house.art.endsWith('_r'), x0 = h.x - h.w / 2, y0 = h.y - h.d / 2;
+        const box = r ? [x0 + h.w, x0 + h.w + 1.2, y0 + L - a1, y0 + L - a0] : [x0 + a0, x0 + a1, y0 + h.d, y0 + h.d + 1.2];
+        house.stair = box;
+        for (let y = Math.floor(box[2]); y < Math.ceil(box[3]); y++) for (let x = Math.floor(box[0]); x < Math.ceil(box[1]); x++)
+          if (inside(x, y) && x + .5 >= box[0] && x + .5 <= box[1] && y + .5 >= box[2] && y + .5 <= box[3]) m.block[idx(x, y)] |= BI;   // cells whose centre is on the stair
+      }
     };
     for (const h of halfHouses) { addHouse(h); addHouse({ ...h, x: h.y, y: h.x, w: h.d, d: h.w }, true); }
 
@@ -195,8 +208,8 @@ const MAP = (() => {
     }
     for (const c of m.craters) stampCrater(m, c);
 
-    /* ---- roads are negative cover where not otherwise covered ---- */
-    for (let i = 0; i < W * H; i++) if (m.road[i] === 2 && !m.area[i]) m.area[i] = 3;
+    /* ---- roads are open ground (no cover), as on CoH3's Italian maps, where negative cover is rare. The 'negative'
+       cover type stays for ground that should have it (none on this map yet). ---- */
 
     /* ---- map edge ---- */
     for (let i = 0; i < W; i++) for (const j of [0, 1, H - 2, H - 1]) { m.block[idx(i, j)] |= BI | BV; m.block[idx(j, i)] |= BI | BV; }
