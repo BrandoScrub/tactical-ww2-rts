@@ -4,6 +4,11 @@ The same text is in `CLAUDE.md` and `AGENTS.md`; change both together.
 
 ## Shipping a change: one check, then merge and publish
 
+**Standing authorization from the owner (BrandoScrub):** Claude may, without asking first, push branches to this
+repository, open pull requests, merge a pull request once `python3 tools/ship.py` prints `PASS` on it, and republish
+`dist/` to the claude.ai artifact "Tactical WW2 RTS". Force-pushing, rewriting `main`'s history and deleting branches
+still need the owner's say-so each time.
+
 1. **The one check:** `python3 tools/ship.py` must print `PASS` (a few minutes). It runs every test the repo has, builds
    the game as it is published (`dist/`) and plays that build in a browser on PC and phone sizes. No other test is
    required before a merge; this overrides any other testing rule in this repo, its docs or project notes.
