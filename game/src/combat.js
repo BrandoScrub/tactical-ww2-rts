@@ -118,6 +118,8 @@ const COMBAT = (() => {
   function squadFire(G, sq, dt) {
     const alive = sq.models.filter(m => m.alive);
     for (const m of alive) { m.since += dt; m.cover = sq.garrison != null ? 'garrison' : MAP.coverAt(G.map, m.x, m.y); }
+    // how long the squad has sat still in cover (garrisons and positions count): mortars look for dug-in targets
+    if (alive.length) { const sc = squadCover(G, sq); sq.coverT = !sq.moving && (sc === 'light' || sc === 'heavy' || sc === 'garrison') ? (sq.coverT || 0) + dt : 0; }
     if (!alive.length || sq.retreating || sq.suppState === 2 || sq.building) return;
     sq.camo = !!(sq.def.camoInCover && sq.stillT > 2 && G.t - sq.lastFire > 4 && alive[0].cover !== 'none' && alive[0].cover !== 'negative');
     const cands = candidates(G, sq);
@@ -184,15 +186,28 @@ const COMBAT = (() => {
     if (fired) sq.lastFire = G.t;
   }
   const w3 = a => a;
+  /* Mortars (auto-fire): shells take seconds to land, so only targets that stay put. First a set-up machine gun (shell it
+     off its position), then other set-up team weapons, then squads that have sat in cover or a building for DUG_IN seconds,
+     then anything else that has stood still that long; stopped vehicles last. Squads that only just stopped are left. */
+  const MORTAR = { dugIn: 4.5, mg: 90, team: 45, cover: 25, vehicle: 15 };
+  function isTeam(o) { return o.type === 'squad' && o.def.crewWeapon && o.crew && o.crew.state !== 'packed'; }
+  function isMg(o) { if (!isTeam(o)) return false; const w = SIM.weaponOf(o); return !!(w && w.kind === 'mg'); }
+  function mortarScore(o, d) {
+    if (o.type === 'vehicle') return o.speed > 1 ? null : d + MORTAR.vehicle;
+    if (o.type !== 'squad' || o.moving || o.retreating) return null;
+    if (isMg(o)) return d - MORTAR.mg;
+    if (isTeam(o)) return d - MORTAR.team;
+    if ((o.coverT || 0) >= MORTAR.dugIn) return d - MORTAR.cover;
+    if ((o.stillT || 0) >= MORTAR.dugIn) return d;
+    return null;
+  }
   function pickMortarTarget(G, sq, w, cands) {
     let best = null, bs = 1e9;
     for (const c of cands) {
       const o = c.e; if (o.type === 'building') continue;
       if (c.d < w.minRange || c.d > w.rng[2]) continue;
-      if (o.type === 'vehicle' && o.speed > 1) continue;
-      if (o.type === 'squad' && o.moving) continue;
-      let s = c.d; if (o.type === 'squad' && o.def.crewWeapon) s -= 30; if (o.type === 'squad' && o.stillT > 4) s -= 10;
-      if (s < bs) { bs = s; best = o; }
+      const s = mortarScore(o, c.d);
+      if (s != null && s < bs) { bs = s; best = o; }
     }
     return best;
   }
@@ -439,6 +454,6 @@ const COMBAT = (() => {
     if (b.hp <= 0) { SIM.event(G, b.owner, 'lost', b.def.name + ' destroyed', b.x, b.y); SIM.kill(G, b); }
   }
 
-  return { HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
+  return { MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;

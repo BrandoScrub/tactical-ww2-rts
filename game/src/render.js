@@ -347,19 +347,39 @@ const RENDER = (() => {
     infantry: g => { g.beginPath(); g.arc(0, -6, 3, 0, U.TAU); g.fill(); g.fillRect(-3, -3, 6, 10); },
     shield: g => { g.beginPath(); g.moveTo(-7, -7); g.lineTo(7, -7); g.lineTo(6, 2); g.lineTo(0, 8); g.lineTo(-6, 2); g.closePath(); g.fill(); },
   };
-  function decoIcon(glyph, slot, state) {
-    const key = 'deco:' + glyph + slot + state; if (R.sprites[key]) return R.sprites[key];
-    const c = canvas(36, 44), g = c.getContext('2d');
+  /* Unit icon (CoH3 decorator): a shield with the side's colour band on top and the unit glyph. Health is the icon
+     itself: the shield fills from the bottom up, green, then amber under 60%, red under 30%; what is lost shows dark.
+     fill: 0..1 (null: a plain icon, no health shown); tone 'build' fills blue (construction). Selected: a white rim.
+     Cached per 5% step. */
+  const HEALTH_COL = f => f > .6 ? '#4f9d3f' : f > .3 ? '#cf9a2a' : '#c23b2c';
+  function decoIcon(glyph, slot, state, fill, tone) {
+    const lvl = fill == null ? -1 : Math.max(0, Math.min(20, Math.ceil(fill * 20)));
+    const key = 'deco:' + glyph + slot + state + ':' + lvl + (tone || ''); if (R.sprites[key]) return R.sprites[key];
+    const c = canvas(36, 44), g = c.getContext('2d'), sel = state === 'sel';
     g.translate(18, 22);
-    g.fillStyle = state === 'sel' ? '#f2f2f2' : slot < 0 ? '#2a2a26' : slot === 1 ? '#2a1414' : '#141c24';
-    g.strokeStyle = '#000'; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(-15, -16); g.lineTo(15, -16); g.lineTo(15, 6); g.lineTo(0, 19); g.lineTo(-15, 6); g.closePath(); g.fill(); g.stroke();
-    g.fillStyle = (TEAM[slot] || '#b0ab9a'); g.fillRect(-15, -16, 30, 5);
-    g.translate(0, 2); g.fillStyle = g.strokeStyle = state === 'sel' ? '#111' : (TEAM[slot] || '#b0ab9a');
+    const shield = () => { g.beginPath(); g.moveTo(-15, -16); g.lineTo(15, -16); g.lineTo(15, 6); g.lineTo(0, 19); g.lineTo(-15, 6); g.closePath(); };
+    g.fillStyle = slot < 0 ? '#2a2a26' : slot === 1 ? '#241312' : '#121a22';
+    shield(); g.fill();
+    if (lvl >= 0) {
+      // the fill rises from the tip (y 19) to under the colour band (y -11), halfway between by height and by area: by
+      // height alone the narrow tip held almost nothing (a nearly dead squad looked empty), by area alone half health
+      // sat well under the middle
+      const f = lvl / 20, A = f * (17 * 30 + 13 * 30 / 2), tri = 13 * 30 / 2;
+      const top = ((A <= tri ? 19 - Math.sqrt(A * 13 / 15) : 6 - (A - tri) / 30) + (19 - 30 * f)) / 2;
+      g.save(); shield(); g.clip();
+      g.fillStyle = tone === 'build' ? '#3f7fb8' : HEALTH_COL(f); g.globalAlpha = .9; g.fillRect(-16, top, 32, 40);
+      g.globalAlpha = .35; g.fillStyle = '#000'; g.fillRect(-16, top, 32, 1.2);   // a hard edge at the level
+      g.restore();
+    }
+    shield(); g.strokeStyle = sel ? '#ffffff' : '#000'; g.lineWidth = sel ? 3 : 2; g.stroke();
+    g.fillStyle = (TEAM[slot] || '#b0ab9a'); g.fillRect(-14, -15, 28, 4);
+    // the glyph light on the fill, with a dark edge so it reads on green, amber or red
+    g.translate(0, 2); g.fillStyle = g.strokeStyle = '#000'; g.globalAlpha = .55; g.save(); g.translate(.8, .8); (GLYPHS[glyph] || GLYPHS.infantry)(g); g.restore(); g.globalAlpha = 1;
+    g.fillStyle = g.strokeStyle = lvl >= 0 ? '#f3efe4' : sel ? '#ffffff' : (TEAM[slot] || '#b0ab9a');
     (GLYPHS[glyph] || GLYPHS.infantry)(g);
     return R.sprites[key] = c;
   }
-  R.decoIcon = decoIcon; R.GLYPHS = GLYPHS; R.TEAM = TEAM;
+  R.decoIcon = decoIcon; R.HEALTH_COL = HEALTH_COL; R.GLYPHS = GLYPHS; R.TEAM = TEAM;
 
   /* ---------------- per-frame ---------------- */
   function init(canvasEl, lib, G) {
@@ -1075,7 +1095,7 @@ const RENDER = (() => {
           const end = e.path[e.path.length - 1], [ex, ey] = toScreen(end.x, end.y); c.fillStyle = 'rgba(150,230,255,.8)'; c.beginPath(); c.ellipse(ex, ey, 5 * k, 2.5 * k, 0, 0, U.TAU); c.fill();
         }
         // shift-queued waypoints: a fainter line on from the current destination, a dot at each stop
-        if (e.queue && e.queue.length) {
+        if (e.type !== 'building' && e.queue && e.queue.length) {
           const from = e.path && e.path.length ? e.path[e.path.length - 1] : e;
           c.strokeStyle = 'rgba(184,240,255,.4)'; c.setLineDash([3 * k, 5 * k]); c.lineWidth = 1.3 * k;
           c.beginPath(); let [qx, qy] = toScreen(from.x, from.y); c.moveTo(qx, qy); for (const q of e.queue) { [qx, qy] = toScreen(q.x, q.y); c.lineTo(qx, qy); } c.stroke(); c.setLineDash([]);
@@ -1143,7 +1163,10 @@ const RENDER = (() => {
     else { x = e.x - e.w / 2; y = e.y - e.d / 2; z = 7.5; }
     let [sx, sy] = toScreen(x, y, z);
     if (sx < -40 || sx > R.W + 40 || sy < -60 || sy > R.H + 40) return;
-    const glyph = e.def.glyph || 'infantry', icon = decoIcon(glyph, e.owner, selected ? 'sel' : 'n');
+    // health lives in the icon: squads by the men's total health against a full squad, vehicles and buildings by hit points
+    const hpFill = e.type === 'squad' ? e.models.reduce((a, m) => a + (m.alive ? Math.max(0, m.hp) : 0), 0) / ((e.models[0] && e.models[0].maxHp || e.def.hp) * e.maxModels)
+      : e.type === 'building' && e.built < 1 ? e.built : Math.max(0, e.hp / e.maxHp);
+    const glyph = e.def.glyph || 'infantry', icon = decoIcon(glyph, e.owner, selected ? 'sel' : 'n', hpFill, e.type === 'building' && e.built < 1 ? 'build' : null);
     const s = .78;
     c.drawImage(icon, sx - 18 * s, sy - 22 * s, 36 * s, 44 * s);
     // vet stars
@@ -1158,29 +1181,19 @@ const RENDER = (() => {
       // suppression / pinned / retreat
       if (e.retreating) { c.fillStyle = '#ffcf5a'; c.beginPath(); c.moveTo(sx + 12, sy + 10); c.lineTo(sx + 20, sy + 4); c.lineTo(sx + 20, sy + 16); c.closePath(); c.fill(); }
       else if (e.suppState) { c.fillStyle = e.suppState === 2 ? '#ff4a3a' : '#ffb03a'; c.font = '800 12px Inter, system-ui'; c.fillText(e.suppState === 2 ? '!!' : '!', sx + 11, sy + 14); }
-      if (e.camo) { c.fillStyle = 'rgba(140,220,140,.9)'; c.font = '700 9px Inter'; c.fillText('camo', sx - 12, sy + 33); }
+      if (e.camo) tag(c, 'CAMO', sx, sy + 20, '#bfe8b0');
       if (e.crew && (e.crew.state === 'setting' || e.crew.state === 'tearing')) { c.strokeStyle = '#ffd34d'; c.lineWidth = 2; c.beginPath(); c.arc(sx, sy - 2, 18 * s, -Math.PI / 2, -Math.PI / 2 + U.TAU * (1 - e.crew.t / ((SIM.weaponOf(e).setup || 2.5)))); c.stroke(); }
-      if (e.building) { c.fillStyle = '#8f8'; c.font = '700 9px Inter'; c.fillText('building', sx - 18, sy + 33); }
+      if (e.building) tag(c, e.order.type === 'repair' ? 'REPAIRING' : 'BUILDING', sx, sy + 20, '#cfe9ff');
     }
-    // health: squads get one segment a soldier (full slots, lost men shown empty), vehicles one bar, buildings when hurt
-    const hcol = f => f > .6 ? '#5c5' : f > .3 ? '#dc4' : '#d43';
-    if (e.type === 'squad') {
-      const n = e.maxModels, gap = 2, w = Math.max(30, Math.min(44, n * 8)), sw = (w - gap * (n - 1)) / n, x0 = sx - w / 2, y0 = sy + 18;
-      c.fillStyle = 'rgba(0,0,0,.75)'; c.fillRect(x0 - 1, y0 - 1, w + 2, 6);
-      for (let i = 0; i < n; i++) {
-        const m = e.models[i], f = m && m.alive ? Math.max(0, m.hp / (m.maxHp || e.def.hp)) : 0, x = x0 + i * (sw + gap);
-        c.fillStyle = '#3a1512'; c.fillRect(x, y0, sw, 4);
-        if (f > 0) { c.fillStyle = hcol(f); c.fillRect(x, y0, sw * f, 4); }
-      }
-    } else if (e.type === 'vehicle' || (e.type === 'building' && e.hp < e.maxHp)) {
-      const w = e.type === 'vehicle' ? 40 : 34, f = Math.max(0, e.hp / e.maxHp);
-      c.fillStyle = 'rgba(0,0,0,.75)'; c.fillRect(sx - w / 2 - 1, sy + 17, w + 2, 7);
-      c.fillStyle = '#3a1512'; c.fillRect(sx - w / 2, sy + 18, w, 5); c.fillStyle = hcol(f); c.fillRect(sx - w / 2, sy + 18, w * f, 5);
-      if (e.type === 'vehicle') { c.fillStyle = 'rgba(0,0,0,.55)'; for (let q = 1; q < 4; q++) c.fillRect(sx - w / 2 + w * q / 4, sy + 18, 1, 5); }
-    }
-    if (e.type === 'building' && e.built < 1) { const w = 34; c.fillStyle = '#222'; c.fillRect(sx - w / 2, sy + 25, w, 4); c.fillStyle = '#8cf'; c.fillRect(sx - w / 2, sy + 24, w * e.built, 4); }
+    // (health is drawn in the icon above; nothing under it)
     // control group
     if (e.owner === 0 && ui.groupOf) { const g = ui.groupOf(e.id); if (g) { c.fillStyle = '#111'; c.fillRect(sx - 6, sy - 40, 12, 13); c.fillStyle = '#eee'; c.font = '700 10px Inter'; c.textAlign = 'center'; c.fillText(g, sx, sy - 30); c.textAlign = 'left'; } }
+  }
+  /* a small label under a unit icon, in the same dark plate as the NO INCOME tag */
+  function tag(c, text, x, y, col) {
+    c.font = '700 9px Inter, system-ui, sans-serif'; const tw = c.measureText(text).width;
+    c.fillStyle = 'rgba(14,15,13,.85)'; c.fillRect(x - tw / 2 - 4, y, tw + 8, 12);
+    c.fillStyle = col; c.textAlign = 'center'; c.fillText(text, x, y + 9); c.textAlign = 'left';
   }
   function drawGhost(G, c, k, g) {
     if (g.kind === 'building') {
