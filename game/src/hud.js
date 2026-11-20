@@ -38,6 +38,7 @@ const HUD = (() => {
     reinforce: g => { g.fillStyle = '#c33'; g.beginPath(); g.arc(0, 0, 15, 0, 7); g.fill(); g.fillStyle = '#fff'; g.fillRect(-3, -10, 6, 20); g.fillRect(-10, -3, 20, 6); },
     sandbags: g => { g.fillStyle = '#c9b88c'; for (let r = 0; r < 2; r++) for (let i = 0; i < 3 - r; i++) { g.beginPath(); g.ellipse(-12 + i * 12 + r * 6, 8 - r * 9, 7, 5, 0, 0, 7); g.fill(); g.strokeStyle = '#5a4a30'; g.lineWidth = 1; g.stroke(); } },
     wire: g => { g.lineWidth = 1.5; g.beginPath(); for (let i = 0; i <= 12; i++) { const x = -16 + i * 2.7, y = Math.sin(i * 1.7) * 6; i ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); g.lineWidth = 3; g.beginPath(); g.moveTo(-14, -10); g.lineTo(-14, 12); g.moveTo(14, -10); g.lineTo(14, 12); g.stroke(); },
+    position: g => { g.fillStyle = '#c9b88c'; for (let i = 0; i < 9; i++) { const a = Math.PI * .15 + i * Math.PI * 1.7 / 8; g.beginPath(); g.ellipse(Math.cos(a) * 11, Math.sin(a) * 7 + 2, 5, 3.5, 0, 0, 7); g.fill(); g.stroke(); } g.fillStyle = '#2b261e'; g.beginPath(); g.ellipse(0, 2, 6, 3.5, 0, 0, 7); g.fill(); },
     tanktrap: g => { g.lineWidth = 4; g.beginPath(); g.moveTo(-12, 12); g.lineTo(12, -12); g.moveTo(-12, -12); g.lineTo(12, 12); g.moveTo(0, -15); g.lineTo(0, 15); g.stroke(); },
     flame: g => { g.fillStyle = '#ff9a3a'; g.beginPath(); g.moveTo(0, -15); g.quadraticCurveTo(14, 0, 6, 14); g.quadraticCurveTo(0, 6, -6, 14); g.quadraticCurveTo(-14, 0, 0, -15); g.fill(); },
     lmg: g => { g.lineWidth = 3; g.beginPath(); g.moveTo(-15, 3); g.lineTo(15, -3); g.moveTo(5, -1); g.lineTo(3, 10); g.moveTo(-3, 1); g.lineTo(-6, 10); g.stroke(); },
@@ -145,6 +146,8 @@ const HUD = (() => {
     if (ui.page === 'build' && e.type === 'squad' && e.def.builder) {
       const defs = ['sandbags', 'wire', 'tanktrap'];
       defs.forEach((d, i) => { const def = D.DEFENCES[d]; out[i] = { img: ico(d), label: def.name, tip: `<b>${def.name}</b><div>Free: ${def.time}s a section. Drag to lay a line.</div><div>${def.cover ? def.cover[0].toUpperCase() + def.cover.slice(1) + ' cover. ' : ''}${def.blocksInfantry ? 'Stops infantry; vehicles crush it. ' : ''}${def.blocksVehicles ? 'Stops vehicles; heavy tanks break it. ' : ''}</div>`, act: () => { ui.mode = { type: 'line', what: d, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; } }; });
+      { const pid = P.side + '_position', def = D.DEFENCES[pid], why = !SIM.canAfford(P, def.cost) ? 'Not enough resources' : null;
+        out[3] = { img: ico('position'), label: def.name, tip: `<b>${def.name}</b><div>Holds one infantry squad or a machine-gun team in heavy cover; an HMG inside fires over the front. Empty, either side can take it.</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => { ui.mode = { type: 'pit', what: pid, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap where to dig it'); } } }; }
       if (P.side === 'us') P.F.buildings.forEach((bid, i) => {
         const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
         if (why === 'Already built') return;
@@ -482,6 +485,7 @@ const HUD = (() => {
         if (!builders.length) { flash('No engineers left to build it'); ui.mode = null; return; }
         issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + ' placed'); return;
       }
+      if (m.type === 'pit') { if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const why = SIM.canPit(G, 0, m.what, wx, wy); if (why) { flash(why); return; } issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; return; }
       if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
       if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
       if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }); ui.mode = null; return; }
@@ -606,7 +610,7 @@ const HUD = (() => {
       if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 10) { touch.moved = true; clearTimeout(touch.lp); }
       if (!touch.moved) return;
       if (ui.boxMode) { mouse.x = e.clientX; mouse.y = e.clientY; return; }
-      if (ui.mode && (ui.mode.type === 'place' || ui.mode.type === 'line' && ui.mode.start)) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = true; return; }   // drag the outline, not the camera
+      if (ui.mode && (ui.mode.type === 'place' || ui.mode.type === 'pit' || ui.mode.type === 'line' && ui.mode.start)) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inCanvas = true; return; }   // drag the outline, not the camera
       const k = RENDER.cam.k, dx = (e.clientX - s.x) / (22 * k), dy = (e.clientY - s.y) / (11 * k);
       RENDER.cam.x = s.cx - (dx + dy) / 2; RENDER.cam.y = s.cy - (dy - dx) / 2; RENDER.clampCam(G);
     });
@@ -616,7 +620,7 @@ const HUD = (() => {
       if (touch.pts.size) { const [p] = [...touch.pts.values()]; touch.start = { x: p.x, y: p.y, t: 0, cx: RENDER.cam.x, cy: RENDER.cam.y }; touch.pinch = null; return; }
       touch.pinch = null;
       if (ui.boxMode && mouse.drag) { if (touch.moved) leftUp(fake(e.clientX, e.clientY, ui.multi)); mouse.down = false; mouse.drag = null; if (touch.moved) { ui.boxMode = false; syncToolbar(); return; } }
-      if (e.type === 'pointerup' && ui.mode && ui.mode.type === 'place' && touch.moved) { tapAt(mouse.x, mouse.y); touch.start = null; return; }   // drag-to-place: lift to build
+      if (e.type === 'pointerup' && ui.mode && (ui.mode.type === 'place' || ui.mode.type === 'pit') && touch.moved) { tapAt(mouse.x, mouse.y); touch.start = null; return; }   // drag-to-place: lift to build
       if (e.type === 'pointerup' && ui.mode && ui.mode.type === 'line' && ui.mode.start && touch.moved) { tapAt(mouse.x, mouse.y); touch.start = null; return; }
       if (e.type === 'pointerup' && !touch.moved && !touch.longed && touch.start) tapAt(touch.start.x, touch.start.y);
       touch.start = null;
@@ -664,6 +668,7 @@ const HUD = (() => {
     ui.ghost = null;
     if (m) {
       if (m.type === 'place') ui.ghost = { kind: 'building', id: m.what, x: wx, y: wy, err: SIM.canPlace(G, 0, m.what, wx, wy) };
+      else if (m.type === 'pit') { const foe = SIM.hqOf(G, 1); ui.ghost = { kind: 'pit', x: wx, y: wy, r: D.DEFENCES[m.what].size / 2, art: D.DEFENCES[m.what].art, face: foe ? Math.atan2(foe.y - wy, foe.x - wx) : 0, err: SIM.canPit(G, 0, m.what, wx, wy) }; }
       else if (m.type === 'line') ui.ghost = m.start ? { kind: 'line', x: m.start.x, y: m.start.y, x2: wx, y2: wy } : { kind: 'target', x: wx, y: wy, r: 1.5 };
       else if (m.type === 'ability' && m.id === 'breach') { const hb = mouse.inCanvas ? houseAtScreen(mouse.x, mouse.y) : null, o = hb && hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = hb ? { kind: 'house', h: hb, ok: !!(o && o.owner === 1), label: o && o.owner === 1 ? 'Breach' : 'No enemy inside' } : { kind: 'target', x: wx, y: wy, r: 1.5, err: 'Pick a building the enemy holds' }; }
       else if (m.type === 'ability') { const A = D.ABILITIES[m.id], e = G.byId.get(m.ids[0]); const d = e ? Math.hypot(wx - e.x, wy - e.y) : 0; ui.ghost = { kind: 'target', x: wx, y: wy, r: A.smoke ? A.smoke.radius : m.id === 'barrage' ? 6 : 4, err: A.minRange && d < A.minRange ? 'Too close' : null }; }

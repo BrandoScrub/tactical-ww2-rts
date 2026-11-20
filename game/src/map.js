@@ -126,6 +126,18 @@ const MAP = (() => {
       return c;
     };
     m.addCover = addCover;
+    /* a fighting position (sandbagged pit or stone nest): garrisoned like a house, but low: it blocks movement, not
+       sight, and is built by engineers (built 0..1). face: the way its firing notch points. */
+    m.addPit = (x, y, def, owner, face) => {
+      const h = { id: m.houses.length, x, y, w: def.size, d: def.size, hp: def.hp * .1, maxHp: def.hp, occ: null, dead: false,
+        pit: true, defId: def.id, prop: def.art, owner, face, built: 0 };
+      m.houses.push(h);
+      const r = def.size / 2 - .2;
+      for (let yy = Math.floor(y - r); yy < Math.ceil(y + r); yy++) for (let xx = Math.floor(x - r); xx < Math.ceil(x + r); xx++)
+        if (inside(xx, yy) && U.dist2(xx + .5, yy + .5, x, y) <= r * r) m.block[idx(xx, yy)] |= BI | BV;
+      m.navDirty = true; m.version++;
+      return h;
+    };
     /* field walls and hedges stay out of the bases, so there is open ground to build on */
     const nearBase = (ax, ay, bx, by) => m.bases.some(b => U.segDist2(b.x, b.y, ax, ay, bx, by) < 50 * 50);
     const addBoth = (kind, ax, ay, bx, by, opts) => {
@@ -318,6 +330,11 @@ const MAP = (() => {
   function houseAt(m, x, y, pad) { const p = pad || 0; for (const h of m.houses) if (!h.dead && Math.abs(x - h.x) <= h.w / 2 + p && Math.abs(y - h.y) <= h.d / 2 + p) return h; return null; }
   function collapseHouse(m, h) {
     if (h.dead) return; h.dead = true; h.hp = 0; h.occ = null;
+    if (h.pit) {                                          // a fighting position just caves in: nothing left standing
+      for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
+        if (x >= 0 && y >= 0 && x < m.w && y < m.h) m.block[y * m.w + x] = (m.block[y * m.w + x] & ~(BI | BV)) | (m.static.block[y * m.w + x] & (BI | BV));
+      m.navDirty = true; m.version++; return;
+    }
     for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
       if (x >= 0 && y >= 0 && x < m.w && y < m.h) m.block[y * m.w + x] &= ~(BI | BV | BL);
     // the walls fall into knee-high rubble: heavy cover along the old outline, passable on foot, a tank can push through

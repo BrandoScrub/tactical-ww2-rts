@@ -17,42 +17,34 @@ from artkit.core.geom import Geometry
 from models.kit import M
 
 
-def stone_wall(length=4.0, height=1.0, seed=1):
+def stone_wall(length=4.0, height=1.0, seed=1, module=False):
     """BRIEF
       is:        a dry-stone field wall (muro a secco) along a lane or field edge
       does:      heavy cover; blocks vehicles; infantry vault it; shells knock gaps in it
-      gameplay:  4 m piece, about 1 m high: a crouching man is covered, a standing one sees over
-      built:     field stones laid without mortar in rough courses, big ones at the foot, the faces battered
-                 inward (about 0.65 m thick at the base, 0.45 m at the top), a course of flat coping stones on top
-                 to shed rain and hold the wall together
+      gameplay:  about 1 m high: a crouching man is covered, a standing one sees over
+      built:     field stones laid without mortar in rough courses, the faces battered inward (about 0.65 m thick at
+                 the base, 0.45 m at the top), a course of flat coping stones on top to shed rain and hold it together
       read_at_play_size: "a pale knee-to-waist stone band"
+    The faces carry the painted field_wall texture (rough courses of field stone), so the body is one battered block;
+    the coping stones are modelled because they break the top line. module=True: a 1 m piece centred on the origin.
     """
     a = Assembly(); rng = np.random.default_rng(seed); a.note(f'dry-stone wall {length} x {height} m')
-    base, top = .65, .45
-    a.add('hearting', sh.extrude([(-top / 2 * M, (height - .12) * M), (top / 2 * M, (height - .12) * M), (base / 2 * M, 0), (-base / 2 * M, 0)][::-1], length * M, 'earth'), grounded=True, tag='base')   # why: small rubble packed between the two faces; drawn as a core the face stones sit on
-    z = 0.0; c = 0
-    while z < height - .2:
-        hgt = .26 - .05 * c + .04 * rng.random()                       # why: biggest stones at the foot, smaller as it rises
-        hw = (base + (top - base) * (z + hgt / 2) / height) / 2
-        gs = []; x = rng.random() * .2
-        while x < length - .05:
-            w = min(length - x, .32 + .28 * rng.random())
-            for side in (-1, 1):                                       # why: two faces, each stone set with its length into the wall
-                y0 = side * hw; y1 = side * (hw - .2)
-                gs.append(sh.slab(x * M + 2, (x + w) * M - 2, min(y0, y1) * M, max(y0, y1) * M, z * M, (z + hgt) * M - 1, 'stone_rough'))
-            x += w
-        a.add(f'course_{c}', Geometry.join(gs), grounded=(c == 0), tag='body')
-        z += hgt; c += 1
-    gs = []; x = 0.0
-    while x < length - .05:                                            # why: coping: flat stones laid across the top, wider than the wall, throw rain clear
-        w = min(length - x, .22 + .1 * rng.random())
-        gs.append(sh.slab(x * M + 2, (x + w) * M - 2, -(top / 2 + .04) * M, (top / 2 + .04) * M, z * M, (z + .12) * M, 'stone_dressed'))
-        x += w
+    base, top, cap = .65, .45, .12
+    prof = [(-top / 2 * M, (height - cap) * M), (top / 2 * M, (height - cap) * M), (base / 2 * M, 0), (-base / 2 * M, 0)]
+    n = max(1, int(round(length)))                                     # built a metre at a time, so the game's pieces cut cleanly
+    a.add('body', Geometry.join([sh.extrude(prof, length / n * M, 'field_wall').move(i * length / n * M, 0, 0) for i in range(n)]), grounded=True, tag='body')   # why: two battered faces of laid stone; the slope lets a dry wall stand
+    gs = []; x = 0.0; i = 0
+    while x < length - 1e-3:                                           # why: coping: flat stones laid across the top, wider than the wall, throw rain clear
+        w = min(length - x, .25 if module else .22 + .1 * rng.random())
+        hh = cap * (.85 + .3 * rng.random())
+        gs.append(sh.slab(x * M + 1.5, (x + w) * M - 1.5, -(top / 2 + .04) * M, (top / 2 + .04) * M, (height - cap) * M, (height - cap + hh) * M, 'stone_dressed'))
+        x += w; i += 1
     a.add('coping', Geometry.join(gs), tag='trim')
+    if module: a.shift(-length / 2 * M, 0, 0)
     return a
 
 
-def hedgerow(length=4.0, seed=2):
+def hedgerow(length=4.0, seed=2, module=False):
     """BRIEF
       is:        an Italian roadside hedgerow: bramble, hawthorn and laurel grown on a low earth bank
       does:      light cover; blocks sight through it; blocks vehicles (the bank and stems); infantry push through
@@ -62,16 +54,18 @@ def hedgerow(length=4.0, seed=2):
       read_at_play_size: "a dark green lumpy band"
     """
     a = Assembly(); rng = np.random.default_rng(seed); a.note(f'hedgerow {length} m')
-    a.add('bank', sh.extrude([(-.7 * M, 0), (-.35 * M, .35 * M), (.35 * M, .35 * M), (.7 * M, 0)][::-1], length * M, 'earth'), grounded=True, tag='base')   # why: the ditch spoil the hedge was planted on
-    xs = np.arange(.3, length, .55) + rng.random() * .1
+    n = max(1, int(round(length)))
+    a.add('bank', Geometry.join([sh.extrude([(-.7 * M, 0), (-.35 * M, .35 * M), (.35 * M, .35 * M), (.7 * M, 0)][::-1], length / n * M, 'earth').move(i * length / n * M, 0, 0) for i in range(n)]), grounded=True, tag='base')   # why: the ditch spoil the hedge was planted on
+    xs = np.arange(.25, length, .5) + rng.random() * .05
     for i, x in enumerate(xs):                                          # why: stems along the crest carry the foliage
         a.strut(f'stem_{i}', (x * M, 0, .35 * M), ((x + rng.normal() * .1) * M, rng.normal() * .1 * M, 1.2 * M), .05 * M, 'bark', free=True, tag='detail')
     gs = []
-    for x in np.arange(.2, length, .45):                                # why: foliage masses: overlapping clumps, lower and wider at the sides
+    for x in np.arange(.25, length, .5):                                # why: foliage masses: overlapping clumps, lower and wider at the sides
         for y, z, r in ((0, 1.25, .5), (-.35, .85, .38), (.35, .85, .38)):
             rr = r * (.85 + .3 * rng.random())
-            gs.append(sh.ellipsoid(rr * M, rr * .9 * M, rr * .8 * M, 'foliage', at=((x + rng.normal() * .08) * M, (y + rng.normal() * .05) * M, (z + rng.normal() * .08) * M), seg=8, rings=5))
+            gs.append(sh.ellipsoid(rr * M, rr * .9 * M, rr * .8 * M, 'hedge_foliage', at=((x + rng.normal() * .06) * M, (y + rng.normal() * .05) * M, (z + rng.normal() * .08) * M), seg=8, rings=5))
     a.add('foliage', Geometry.join(gs), tag='body')
+    if module: a.shift(-length / 2 * M, 0, 0)
     return a
 
 
@@ -150,7 +144,7 @@ VARIANTS = {
 }
 
 GREYS = {'stone_rough': (170, 170, 165), 'stone_dressed': (210, 210, 205), 'earth': (140, 132, 118),
-         'bark': (95, 90, 84), 'foliage': (120, 125, 112), 'foliage_olive': (160, 165, 150),
+         'bark': (95, 90, 84), 'foliage': (120, 125, 112), 'hedge_foliage': (120, 125, 112), 'field_wall': (170, 170, 165), 'foliage_olive': (160, 165, 150),
          'foliage_dark': (90, 96, 86), 'limestone': (200, 198, 190)}
 
 

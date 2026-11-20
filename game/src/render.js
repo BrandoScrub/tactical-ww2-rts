@@ -75,6 +75,31 @@ const RENDER = (() => {
     c.drawImage(A.c, rc.x + .5, rc.y + .5, rc.w - 1, rc.h - 1, .5, .5, rc.w - 1, rc.h - 1);
     c.setTransform(1, 0, 0, 1, 0, 0);
   }
+  /* Prop art (art/props.json, made by tools/build_props.py from models/defences.py and models/terrain.py): field
+     defences, walls, hedges, trees and rock as sprite strips, one frame per heading, at the unit art's scale (1 sprite
+     px = 1 screen px at zoom 1). Line pieces ('len' metres long) are repeated along a cover line; each has 'first',
+     'last' and 'solo' versions whose open ends are drawn whole. Without the file the canvas stand-ins below are used. */
+  R.props = null;
+  function loadProps(base) {
+    return fetch(base + 'props.json').then(r => r.ok ? r.json() : null).then(P => {
+      if (!P) return;
+      const jobs = [];
+      const load = rec => jobs.push(new Promise(res => { const im = new Image(); im.onload = () => { rec.img = im; res(); }; im.onerror = () => res(); im.src = base + rec.src; }));
+      for (const k in P) { load(P[k]); for (const e in P[k].ends || {}) load(P[k].ends[e]); if (P[k].front) load(P[k].front); }
+      return Promise.all(jobs).then(() => { R.props = P; });
+    }).catch(() => {});
+  }
+  /* one prop frame with its origin at screen (sx, sy); ang: world heading in radians; end: 'first' | 'last' | 'solo' */
+  function drawProp(c, key, sx, sy, k, ang, end, scale) {
+    const P = R.props, r0 = P && P[key]; if (!r0) return false;
+    const r = end ? (r0.ends && r0.ends[end]) || r0[end] || r0 : r0; if (!r.img) return false;
+    const n = r.headings, i = n === 1 ? 0 : ((Math.round(((ang || 0) * 180 / Math.PI) / r.span * n) % n) + n) % n;
+    const [fw, fh] = r.frame, [ax, ay] = r.anchor, s = k * (scale || 1);
+    c.drawImage(r.img, i * fw, 0, fw, fh, sx - ax * s, sy - ay * s, fw * s, fh * s);
+    return true;
+  }
+  const hasProp = key => !!(R.props && R.props[key] && R.props[key].img);
+
   /* Relief shading baked over the ground texture, in the manner of a painted map: slopes turned from the light (upper
      left) take a soft shadow, slopes toward it and the tops a little warm light. Gentle on purpose so it sits with the
      painted ground; the H view shows exact heights. */
@@ -413,13 +438,17 @@ const RENDER = (() => {
     drawPoints(G, c, k);
     // shadows of everything that moves, then all objects back to front
     const list = [];
+    R.under = [];                                         // squads and vehicles shown this frame (trees over them fade)
+    for (const e of G.ents) if (!e.dead && (e.type === 'squad' || e.type === 'vehicle') && FOG.visible(G, me, e)) R.under.push(e);
     for (const t of G.map.trees) if (vis(t.x, t.y, 160)) list.push({ d: t.x + t.y, f: () => drawTree(c, t, k) });
     const shadows = [];
-    for (const h of G.map.houses) if ((!h.dead || houseArt(h)) && vis(h.x, h.y, 260)) {
+    for (const h of G.map.houses) {
+      if (h.pit) { if (!h.dead && vis(h.x, h.y, 120) && (h.owner === me || FOG.explored(G, me, h.x, h.y))) { list.push({ d: h.x + h.y - 2.2, f: () => drawPit(G, c, h, k, false) }); list.push({ d: h.x + h.y + 1.6, f: () => drawPit(G, c, h, k, true) }); } continue; }
+      if (!((!h.dead || houseArt(h)) && vis(h.x, h.y, 260))) continue;
       list.push({ d: h.x + h.y + (h.w + h.d) * .25, f: () => drawHouse(c, h, k) });
       if (houseArt(h)) { const [nx, ny] = toScreen(h.x + h.w / 2, h.y + h.d / 2); shadows.push(() => ArtKit.drawShadow(c, R.lib, h.art, houseState(h), nx, ny, k)); }
     }
-    for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) });
+    for (const cv of G.map.covers) if (cv.alive && vis((cv.ax + cv.bx) / 2, (cv.ay + cv.by) / 2, 100)) { if (!coverPieces(G, c, cv, k, list)) list.push({ d: (cv.ax + cv.bx + cv.ay + cv.by) / 2, f: () => drawCover(c, cv, k) }); }
     for (const w of G.wrecks || []) if (vis(w.x, w.y, 200)) list.push({ d: w.x + w.y, f: () => drawWreck(G, c, w, k) });
     for (const d of G.drops || []) if (vis(d.x, d.y, 120) && FOG.explored(G, me, d.x, d.y)) list.push({ d: d.x + d.y, f: () => drawDrop(G, c, d, k, ui) });
     if (R.opt.corpses) for (const cp of G.corpses || []) if (vis(cp.x, cp.y, 60) && FOG.explored(G, me, cp.x, cp.y)) list.push({ d: cp.x + cp.y - .5, f: () => drawCorpse(G, c, cp, k) });
@@ -504,7 +533,19 @@ const RENDER = (() => {
 
   /* ---------------- scenery ---------------- */
   function drawTree(c, t, k) {
-    const sp = treeSprite(t.kind, t.seed), [sx, sy] = toScreen(t.x, t.y), s = .55 * k * t.s;
+    const [sx, sy] = toScreen(t.x, t.y);
+    const key = t.kind === 'olive' ? 'olive_' + (t.seed % 4) : 'cypress_' + (t.seed % 2);
+    if (hasProp(key)) {
+      const s = k * t.s * (t.kind === 'olive' ? .85 : 1);
+      c.fillStyle = 'rgba(20,24,10,.26)'; c.beginPath(); c.ellipse(sx + 14 * s, sy + 5 * s, (t.kind === 'olive' ? 58 : 20) * s, (t.kind === 'olive' ? 26 : 9) * s, 0, 0, U.TAU); c.fill();
+      // a crown with men under or behind it is drawn see-through, so they stay visible (as CoH3 fades foliage)
+      const fade = t.kind === 'olive' && R.under && R.under.some(p => Math.abs(p.x - t.x) < 4 && Math.abs(p.y - t.y) < 4 && p.x + p.y < t.x + t.y + 1.5);
+      if (fade) c.globalAlpha = .5;
+      drawProp(c, key, sx, sy, k, 0, null, t.s * (t.kind === 'olive' ? .85 : 1));
+      if (fade) c.globalAlpha = 1;
+      return;
+    }
+    const sp = treeSprite(t.kind, t.seed), s = .55 * k * t.s;
     c.fillStyle = 'rgba(20,24,10,.28)'; c.beginPath(); c.ellipse(sx + 10 * s, sy + 3 * s, (t.kind === 'olive' ? 50 : 16) * s, (t.kind === 'olive' ? 22 : 8) * s, 0, 0, U.TAU); c.fill();
     c.drawImage(sp.c, sx - sp.ax * s, sy - sp.ay * s, sp.c.width * s, sp.c.height * s);
   }
@@ -515,6 +556,26 @@ const RENDER = (() => {
     f([[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], right);
     f([[x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], left);
     if (top) f([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], top);
+  }
+  /* a fighting position: the far half before the men in it, the near half after (so its parapet hides their legs);
+     drawn faint while it is dug, with the holder's flag on a short pole once someone is in it */
+  function drawPit(G, c, h, k, front) {
+    const [sx, sy] = toScreen(h.x, h.y), a = h.built < 1 ? .35 + h.built * .45 : 1;
+    if (a < 1) c.globalAlpha = a;
+    if (!drawProp(c, h.prop, sx, sy, k, h.face, front ? 'front' : null) && !front) {
+      c.fillStyle = '#8f8366'; c.beginPath(); c.ellipse(sx, sy, h.w / 2 * 31 * k, h.w / 2 * 15.5 * k, 0, 0, U.TAU); c.fill();
+      c.fillStyle = '#2c2822'; c.beginPath(); c.ellipse(sx, sy, h.w / 3 * 31 * k, h.w / 3 * 15.5 * k, 0, 0, U.TAU); c.fill();
+    }
+    c.globalAlpha = 1;
+    if (front && h.occ != null) {
+      const o = G.byId.get(h.occ);
+      if (o && !o.dead && (o.owner === 0 || FOG.visible(G, 0, o))) {
+        const bx = h.x - Math.cos(h.face) * h.w * .42, by = h.y - Math.sin(h.face) * h.w * .42;
+        const [px, py] = toScreen(bx, by, .6), [qx, qy] = toScreen(bx, by, 2.4);
+        c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
+        c.fillStyle = TEAM[o.owner]; c.fillRect(qx, qy, 11 * k, 7 * k);
+      }
+    }
   }
   /* Farmhouses: the artkit sprites (art/scenery/, tools/build_scenery.py) in three stages: intact, 'damaged' under 60%
      health (roof holed, a breach in the end wall; still garrisonable), 'ruined' once collapsed (its rubble outline is the
@@ -685,6 +746,38 @@ const RENDER = (() => {
     // occupied: the occupier's flag on the ridge (enemy flags only once the house has been seen)
     drawHouseFlag(c, h, k, ridge);
   }
+  /* Cover drawn from prop art, a piece at a time, each piece sorted by its own depth so a man behind a long wall is
+     hidden by the bit in front of him and not by the whole line. Returns false when there is no art for this kind. */
+  function coverKey(G, cv) {
+    if (cv.kind === 'wire') { const side = cv.owner >= 0 && G.players[cv.owner] ? G.players[cv.owner].side : 'us'; return 'wire_' + side; }
+    return { sandbags: 'sandbags', wall: 'wall', hedge: 'hedge', tanktrap: 'tanktrap_0' }[cv.kind] || null;
+  }
+  function coverPieces(G, c, cv, k, list) {
+    const key = coverKey(G, cv); if (!key || !hasProp(key)) return false;
+    const L = Math.hypot(cv.bx - cv.ax, cv.by - cv.ay), ang = Math.atan2(cv.by - cv.ay, cv.bx - cv.ax);
+    const alpha = cv.built < 1 ? .35 + cv.built * .4 : 1;
+    if (cv.kind === 'tanktrap') {                         // free-standing hedgehogs, about one per 2 m
+      const n = Math.max(1, Math.round(L / 2));
+      for (let i = 0; i < n; i++) {
+        const t = (i + .5) / n, x = cv.ax + (cv.bx - cv.ax) * t, y = cv.ay + (cv.by - cv.ay) * t, v = 'tanktrap_' + ((cv.id * 7 + i) % 3);
+        list.push({ d: x + y, f: () => { const [sx, sy] = toScreen(x, y); if (alpha < 1) c.globalAlpha = alpha; drawProp(c, v, sx, sy, k, 0); c.globalAlpha = 1; } });
+      }
+      return true;
+    }
+    const P = R.props[key], n = Math.max(1, Math.round(L / P.len));
+    const fi = ((Math.round((ang * 180 / Math.PI) / P.span * P.headings) % P.headings) + P.headings) % P.headings;
+    // the pieces are cut for a line running along the frame's +x from 'first' to 'last'; when the frame shown points
+    // the other way along this line (the same picture turned 180 degrees), the ends swap
+    const flip = Math.cos(ang - fi * P.span / P.headings * Math.PI / 180) < 0;
+    for (let i = 0; i < n; i++) {
+      const t = (i + .5) / n, x = cv.ax + (cv.bx - cv.ax) * t, y = cv.ay + (cv.by - cv.ay) * t;
+      const end = n === 1 ? 'solo' : i === 0 ? 'first' : i === n - 1 ? 'last' : null;
+      const e2 = end === 'first' && flip ? 'last' : end === 'last' && flip ? 'first' : end;
+      const kk = cv.kind === 'hedge' && (i + cv.id) % 2 ? 'hedge_b' : key;
+      list.push({ d: x + y, f: () => { const [sx, sy] = toScreen(x, y); if (alpha < 1) c.globalAlpha = alpha; drawProp(c, kk, sx, sy, k, ang, e2); c.globalAlpha = 1; } });
+    }
+    return true;
+  }
   function drawCover(c, cv, k) {
     const L = Math.hypot(cv.bx - cv.ax, cv.by - cv.ay);
     const a = cv.built < 1 ? .35 + cv.built * .4 : 1;
@@ -790,7 +883,9 @@ const RENDER = (() => {
   const FULL = new Set(['rifleman', 'leader', 'lmg', 'sapper', 'flamethrower', 'sniper', 'assault_trooper', 'rocket_gunner']);
   function memOf(obj) { let m = R.mem.get(obj); if (!m) R.mem.set(obj, m = {}); return m; }
   function drawSquadParts(G, sq, k, list, shadows) {
-    if (sq.garrison != null) return;   // inside a house: the house shows the flag, muzzle flashes show at the windows
+    const pitH = sq.garrison != null && G.map.houses[sq.garrison] && G.map.houses[sq.garrison].pit ? G.map.houses[sq.garrison] : null;
+    if (sq.garrison != null && !pitH) return;   // inside a house: the house shows the flag, muzzle flashes show at the windows
+    const sink = pitH ? -.45 : 0;               // in a fighting position the men stand in the dug pit
     const side = G.players[sq.owner].side, alive = sq.models.filter(m => m.alive);
     const deployed = sq.crew && sq.crew.state !== 'packed';
     const lay = deployed ? G.layout && G.layout.weapons[side + '_' + sq.def.crewWeapon] : null;
@@ -801,8 +896,8 @@ const RENDER = (() => {
         const key = (sq.weaponSide || side) + '_' + cw, deg = sq.crew.heading * 180 / Math.PI, fireAge = G.t - (sq.cwFireT || -9);
         const clip = fireAge < .5 && R.lib[key] && R.lib[key].m.clips.fire ? 'fire' : 'idle';
         const fr = clip === 'fire' ? Math.min(R.lib[key].m.clips.fire.frames - 1, Math.floor(fireAge * R.lib[key].m.clips.fire.fps)) : 0;
-        const [sx, sy] = toScreen(sq.crew.x, sq.crew.y);
-        shadows.push(() => ArtKit.drawUnitShadow(R.ctx, R.lib, key, { clip, frame: fr, heading: deg }, sx, sy, k));
+        const [sx, sy] = toScreen(sq.crew.x, sq.crew.y, sink);
+        if (!pitH) shadows.push(() => ArtKit.drawUnitShadow(R.ctx, R.lib, key, { clip, frame: fr, heading: deg }, sx, sy, k));
         list.push({ d: sq.crew.x + sq.crew.y, f: () => ArtKit.drawUnit(R.ctx, R.lib, key, { clip, frame: fr, heading: deg }, sx, sy, k) });
       } else if (sq.def.towed && alive.length) {
         // limbered gun pushed by the first two men
@@ -822,7 +917,7 @@ const RENDER = (() => {
         key = crewUnit ? crewUnit : side + '_rifleman';
       } else if (sq.crew && sq.def.towed && idx < 2) key = side + '_pusher';
       const hop = m.vaultT > 0 ? Math.sin(Math.PI * (1 - m.vaultT / .6)) * .7 : 0;   // the vault: a short hop
-      const [sx, sy] = toScreen(m.x, m.y, hop);
+      const [sx, sy] = toScreen(m.x, m.y, hop + sink);
       const lib = R.lib[key]; if (!lib) return;
       const mem = memOf(m);
       const full = FULL.has(key.slice(3));
@@ -837,7 +932,7 @@ const RENDER = (() => {
         const fr = clip === 'walk' ? ArtKit.frameOf(lib.m, 'walk', G.t, mem.d * PXM * k, k) : clip === 'fire' ? Math.min(clips.fire.frames - 1, Math.floor(m.since * clips.fire.fps)) : ArtKit.frameOf(lib.m, 'idle', G.t + m.i * .37, null, k);
         s = { clip, frame: fr, heading: (deployed ? aim : m.heading) * 180 / Math.PI };
       }
-      shadows.push(() => { if (pose) ArtKit.drawUnitShadow(R.ctx, R.lib, key, { clip: pose.lc, frame: pose.lf, heading: aimDeg(lib, pose.lh) }, sx, sy, k); else ArtKit.drawUnitShadow(R.ctx, R.lib, key, s, sx, sy, k); });
+      if (!pitH) shadows.push(() => { if (pose) ArtKit.drawUnitShadow(R.ctx, R.lib, key, { clip: pose.lc, frame: pose.lf, heading: aimDeg(lib, pose.lh) }, sx, sy, k); else ArtKit.drawUnitShadow(R.ctx, R.lib, key, s, sx, sy, k); });
       list.push({ d: m.x + m.y, f: () => { if (pose) UnitKit.drawFig(R.ctx, lib, pose, sx, sy, k); else ArtKit.drawUnit(R.ctx, R.lib, key, s, sx, sy, k); } });
     });
   }
@@ -1081,6 +1176,11 @@ const RENDER = (() => {
       c.fillStyle = ok ? 'rgba(90,220,140,.25)' : 'rgba(255,80,60,.25)'; c.strokeStyle = ok ? '#6f6' : '#f55'; c.lineWidth = 2;
       c.beginPath(); [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b], i) => { const [sx, sy] = toScreen(g.x + a * def.size[0] / 2, g.y + b * def.size[1] / 2); i ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }); c.closePath(); c.fill(); c.stroke();
       if (g.err) { const [sx, sy] = toScreen(g.x, g.y, 2); c.fillStyle = '#fbb'; c.font = '600 13px Inter'; c.textAlign = 'center'; c.fillText(g.err, sx, sy); c.textAlign = 'left'; }
+    } else if (g.kind === 'pit') {
+      const ok = !g.err, [sx, sy] = toScreen(g.x, g.y);
+      c.globalAlpha = .55; drawProp(c, g.art, sx, sy, k, g.face || 0); drawProp(c, g.art, sx, sy, k, g.face || 0, 'front'); c.globalAlpha = 1;
+      c.strokeStyle = ok ? '#6f6' : '#f55'; c.lineWidth = 2; c.beginPath(); c.ellipse(sx, sy, g.r * 31 * k, g.r * 15.5 * k, 0, 0, U.TAU); c.stroke();
+      if (g.err) { c.fillStyle = '#fbb'; c.font = '600 13px Inter'; c.textAlign = 'center'; c.fillText(g.err, sx, sy - 30 * k); c.textAlign = 'left'; }
     } else if (g.kind === 'line') {
       const [ax, ay] = toScreen(g.x, g.y), [bx, by] = toScreen(g.x2, g.y2);
       c.strokeStyle = 'rgba(120,255,160,.85)'; c.lineWidth = 4 * k; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
@@ -1123,6 +1223,7 @@ const RENDER = (() => {
     for (const key in lib) { const o = lib[key]; for (const k in o.img || {}) if (o.img[k]) out.push(o.img[k]); }
     for (const k in R.sprites) { const v = R.sprites[k], cv = v && (v.c || v); if (cv && cv.width) out.push(cv); }
     if (R.ground) out.push(R.ground);
+    for (const key in R.props || {}) { const r = R.props[key]; if (r.img) out.push(r.img); for (const e in r.ends || {}) if (r.ends[e].img) out.push(r.ends[e].img); if (r.front && r.front.img) out.push(r.front.img); }
     return out;
   }
   function warmStep(list, from, budgetBytes) {
@@ -1134,5 +1235,5 @@ const RENDER = (() => {
   }
   const isGL = () => !!(R.ctx && R.ctx.endFrame);
 
-  return Object.assign(R, { loadGround, loadMats, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
+  return Object.assign(R, { loadGround, loadMats, loadProps, drawProp, warmList, warmStep, isGL, buildGround, init, resize, frame, toScreen, toWorld, clampCam, updateFogCanvas, portrait, PXM });
 })();

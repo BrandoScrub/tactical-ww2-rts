@@ -20,7 +20,55 @@ const AI = (() => {
     S.t = G.t + 1;
     const mine = G.ents.filter(e => !e.dead && e.owner === slot);
     spend(G, me, mine, S);
+    fortify(G, me, mine, S);
     command(G, me, mine, S);
+  }
+
+  /* Field works: now and then an idle builder digs a fighting position by a point we hold on the side facing the
+     enemy and lays a sandbag line in front of it (CoH3 engineers fortify held points). A few positions at most, and
+     only with manpower to spare, so it never starves the army or the tech. */
+  const FORT = { every: 20, maxPits: { us: 2, de: 3 }, spare: 120, from: 120 };
+  function fortify(G, me, mine, S) {
+    // the sandbags that go with a finished position
+    for (const e of mine) if (e.fortQueue && e.type === 'squad' && !e.retreating && e.order.type !== 'build' && !e.buildQueue.length) { const o = e.fortQueue; e.fortQueue = null; SIM.issue(G, [e.id], o); }
+    // man our empty positions: the nearest machine-gun team, else an infantry squad holding near it
+    if ((S.manT || 0) < G.t) {
+      S.manT = G.t + 3;
+      for (const h of G.map.houses) {
+        if (!h.pit || h.dead || h.built < 1 || h.occ != null || h.owner !== me.slot || mine.some(e => e.order && e.order.type === 'garrison' && e.order.house === h.id)) continue;
+        const free = e => e.type === 'squad' && !e.retreating && e.garrison == null && !e.def.builder && e.order.type !== 'attack' && e.suppState < 2;
+        const near = (e, r) => U.dist2(e.x, e.y, h.x, h.y) < r * r;
+        const hmg = mine.filter(e => free(e) && e.def.crewWeapon === 'tripod_mg' && near(e, 45)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
+        const inf = hmg ? null : mine.filter(e => free(e) && !e.crew && near(e, 18)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
+        const who = hmg || inf; if (who) SIM.issue(G, [who.id], { type: 'garrison', house: h.id });
+      }
+    }
+    if (G.t < FORT.from || (S.fortT || 0) > G.t) return;
+    S.fortT = G.t + FORT.every;
+    const id = me.side + '_position', def = D.DEFENCES[id]; if (!def) return;
+    const b = mine.find(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type !== 'build' && e.order.type !== 'repair' && !e.buildQueue.length && !e.fortQueue && G.t - e.lastHit > 5);
+    if (!b || me.res.mp < (def.cost.mp || 0) + FORT.spare) return;
+    const pits = G.map.houses.filter(h => h.pit && !h.dead && h.owner === me.slot);
+    if (pits.length >= FORT.maxPits[me.side]) return;
+    const hq = SIM.hqOf(G, me.slot), foe = SIM.hqOf(G, 1 - me.slot); if (!hq || !foe) return;
+    const held = G.map.points.filter(p => p.owner === me.slot && !pits.some(h => U.dist2(h.x, h.y, p.x, p.y) < 20 * 20) && Math.hypot(p.x - hq.x, p.y - hq.y) < 90)
+      .sort((a, c) => Math.hypot(a.x - foe.x, a.y - foe.y) - Math.hypot(c.x - foe.x, c.y - foe.y));
+    for (const p of held) {
+      const face = Math.atan2(foe.y - p.y, foe.x - p.x);
+      for (const off of [0, .6, -.6, 1.1, -1.1]) {
+        const a = face + off, x = p.x + Math.cos(a) * (p.radius + 6), y = p.y + Math.sin(a) * (p.radius + 6);
+        if (SIM.canPit(G, me.slot, id, x, y)) continue;
+        SIM.issue(G, [b.id], { type: 'build', what: id, x, y, face });
+        // and a sandbag line 4 m in front of it, across the line of fire
+        const fx = x + Math.cos(face) * 4.2, fy = y + Math.sin(face) * 4.2, px = -Math.sin(face) * 3, py = Math.cos(face) * 3;
+        const sb = { type: 'build', what: 'sandbags', x: fx - px, y: fy - py, x2: fx + px, y2: fy + py };
+        // only on open ground: not into a house, a wall or the position itself
+        const nav = MAP.navGrids(G.map).inf; let clear = true;
+        for (let t = 0; t <= 1.0001 && clear; t += .125) { const qx = sb.x + (sb.x2 - sb.x) * t, qy = sb.y + (sb.y2 - sb.y) * t; if (!MAP.walkable(nav, G.map, qx, qy) || MAP.houseAt(G.map, qx, qy, 1)) clear = false; }
+        if (clear) b.fortQueue = sb;
+        return;
+      }
+    }
   }
 
   function spend(G, me, mine, S) {
@@ -131,6 +179,30 @@ const AI = (() => {
     return null;
   }
 
+  /* Cover the AI moves squads to: a spot a step behind a finished cover segment (sandbags, wall, hedge, rubble, tank
+     trap, wreck) that runs across the line of fire from `face`, within r metres of (x, y). Heavy cover beats light;
+     nearer beats farther; a spot that walks the squad toward the enemy costs more. Wire gives no cover. */
+  const COVER_SEEK = { behind: .85, heavyBonus: 4, advanceCost: .6, react: 10, snap: 9, cooldown: 7 };
+  function coverSpot(G, x, y, face, r, fromX, fromY) {
+    const nav = MAP.navGrids(G.map).inf, fx = Math.cos(face), fy = Math.sin(face), seen = new Set();
+    let best = null, bs = 1e9;
+    for (let gx = -1; gx <= 1; gx++) for (let gy = -1; gy <= 1; gy++) for (const c of MAP.coversNear(G.map, x + gx * 8, y + gy * 8)) {
+      if (seen.has(c) || !c.alive || !c.cover || c.cover === 'negative' || c.built < 1) continue; seen.add(c);
+      const L = Math.hypot(c.bx - c.ax, c.by - c.ay); if (L < .5) continue;
+      const nx = -(c.by - c.ay) / L, ny = (c.bx - c.ax) / L, dot = nx * fx + ny * fy;
+      if (Math.abs(dot) < .45) continue;                                // running along the line of fire: shields nobody
+      const sd = dot > 0 ? -1 : 1, steps = Math.max(1, Math.round(L / 1.5));
+      for (let i = 0; i < steps; i++) {
+        const t = (i + .5) / steps, px = c.ax + (c.bx - c.ax) * t + nx * sd * COVER_SEEK.behind, py = c.ay + (c.by - c.ay) * t + ny * sd * COVER_SEEK.behind;
+        const d = Math.hypot(px - x, py - y); if (d > r || !MAP.walkable(nav, G.map, px, py)) continue;
+        const adv = fromX == null ? 0 : Math.max(0, (px - fromX) * fx + (py - fromY) * fy);
+        const sc = d + adv * COVER_SEEK.advanceCost - (c.cover === 'heavy' ? COVER_SEEK.heavyBonus : 0);
+        if (sc < bs) { bs = sc; best = { x: px, y: py, cover: c.cover }; }
+      }
+    }
+    return best;
+  }
+
   function command(G, me, mine, S) {
     const slot = me.slot, enemy = 1 - slot, pts = G.map.points;
     const hq = SIM.hqOf(G, slot); if (!hq) return;
@@ -215,6 +287,23 @@ const AI = (() => {
       }
       // a garrison mostly holds its house
       if (e.garrison != null && G.rng() > .04) continue;
+      // caught in the open in a fight: take the nearest cover across the line of fire (CoH3 players do this all game)
+      if (e.type === 'squad' && !e.crew && e.garrison == null && !(e.def.builder && e.order.type === 'build') && (e.coverT || 0) < G.t &&
+          (G.t - e.lastHit < 3 || G.t - e.lastFire < 3) && e.suppState < 2) {
+        const sc = COMBAT.squadCover(G, e);
+        if (sc === 'none' || sc === 'negative') {
+          let foe = null, fd = 1e9; for (const o of visibleEnemies) { const d = U.dist2(o.x, o.y, e.x, e.y); if (d < fd) { fd = d; foe = o; } }
+          if (foe && fd < 60 * 60) {
+            const face = Math.atan2(foe.y - e.y, foe.x - e.x);
+            // taking a point: stay inside its circle
+            const cap = pts.find(p => p.owner !== slot && Math.hypot(p.x - e.x, p.y - e.y) < p.radius + 2);
+            let spot = coverSpot(G, e.x, e.y, face, COVER_SEEK.react, e.x, e.y);
+            if (spot && cap && Math.hypot(spot.x - cap.x, spot.y - cap.y) > cap.radius - .8) spot = null;
+            e.coverT = G.t + COVER_SEEK.cooldown;
+            if (spot) { SIM.issue(G, [e.id], { type: 'move', x: spot.x, y: spot.y, face }); continue; }
+          }
+        }
+      }
       // busy moving or fighting: let it be, but re-target now and then
       const busy = (e.path && e.path.length) || e.order.type === 'attack' || (e.crew && e.crew.state !== 'packed' && G.t - e.lastFire < 8) || (G.t - e.lastFire < 3);
       if (busy && G.rng() > .08) continue;
@@ -239,11 +328,20 @@ const AI = (() => {
       const toward = enemyHq ? Math.atan2(enemyHq.y - p.y, enemyHq.x - p.x) : 0;
       let tx = p.x + G.rng.range(-4, 4), ty = p.y + G.rng.range(-4, 4);
       if (e.crew) { tx = p.x - Math.cos(toward) * 8; ty = p.y - Math.sin(toward) * 8; }
-      // infantry sometimes hold the point from a house beside it
-      if (e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < .3) {
-        const h = G.map.houses.find(h => !h.dead && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
+      // a machine-gun team mans a free fighting position by the point (CoH3: HMGs garrison them)
+      if (e.crew && e.def.crewWeapon === 'tripod_mg' && e.garrison == null) {
+        const h = G.map.houses.find(h => h.pit && !h.dead && h.built >= 1 && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < 22 * 22);
         if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
       }
+      if (e.garrison != null && G.map.houses[e.garrison] && G.map.houses[e.garrison].pit && U.dist2(e.x, e.y, p.x, p.y) < 25 * 25) continue;   // already holding it from a position
+      // infantry sometimes hold the point from a house beside it
+      if (e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < .3) {
+        const h = G.map.houses.find(h => !h.dead && h.occ == null && !(h.built < 1) && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
+        if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
+      }
+      // infantry stop behind cover near the point when there is some, rather than on open ground
+      // (a point still to take: only cover inside its capture circle, or the squad would sit outside it and never take it)
+      if (e.type === 'squad' && !e.crew) { const sp = coverSpot(G, p.x, p.y, toward, p.owner === slot ? p.radius + COVER_SEEK.snap : p.radius - 1); if (sp && (p.owner === slot || Math.hypot(sp.x - p.x, sp.y - p.y) < p.radius - .8)) { tx = sp.x; ty = sp.y; } }
       if (U.dist2(tx, ty, e.x, e.y) < 6 * 6) continue;   // already there
       SIM.issue(G, [e.id], { type: e.crew ? 'move' : 'attackMove', x: tx, y: ty, face: toward });
     }

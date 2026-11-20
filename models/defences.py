@@ -56,7 +56,7 @@ def _path(length, bend):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-def sandbag_wall(length=4.0, bend=0.0, courses=6):
+def sandbag_wall(length=4.0, bend=0.0, courses=6, module=False):
     """BRIEF
       is:        a sandbag breastwork, the CoH3 Sandbag Wall (one 4 m piece; bend > 0 for the curved pieces maps ship)
       does:      heavy cover for a squad kneeling behind it; vaultable; grenades and HE wear it down
@@ -66,6 +66,8 @@ def sandbag_wall(length=4.0, bend=0.0, courses=6):
       references: MTP No. 30 Part V (bag 20 x 10 x 5 in laid); US / British field photos (stepped breastworks);
                  CoH3 sandbag walls (single colour band, rounded tops read at play size)
       read_at_play_size: "a low lumpy tan wall men crouch behind"
+    module=True: a piece the game repeats along any line: every bag whose centre falls in [0, length) is kept (the
+    stagger's half bags overhang the ends and meet the next piece's), and the piece is centred on the origin.
     """
     a = Assembly(); pos, run = _path(length, bend)
     a.note(f'sandbag wall {length} m, bend {bend} m, {courses} courses')
@@ -73,15 +75,18 @@ def sandbag_wall(length=4.0, bend=0.0, courses=6):
     rows = [3, 3, 2, 2, 2, 1][:courses] + [1] * max(0, courses - 6)   # why: about 0.75 m thick at the base stops rifle fire; stepped in so it stands
     for c, n in enumerate(rows):
         gs = []; off = (c % 2) * L / 2                                  # why: half-bag stagger so no joint runs through two courses
-        k = int(math.ceil(run / L)) + 1
+        k = int(math.ceil(run / L)) + 2
         for r in range(n):
             yo = (r - (n - 1) / 2) * W
             for i in range(k):
                 s = i * L + L / 2 - off
-                if s < L * .3 or s > run - L * .3: continue          # ends finish square, no half bags hanging off
+                if module: ok = -1e-6 <= s < run - 1e-6
+                else: ok = L * .3 <= s <= run - L * .3                 # ends finish square, no half bags hanging off
+                if not ok: continue
                 x, y, ang = pos(s)
                 gs.append(_place(_pillow(L * .98, W * .96, H), x - math.sin(ang) * yo, y + math.cos(ang) * yo, c * H * .92 + H / 2, ang))
         a.add(f'course_{c}', Geometry.join(gs), grounded=(c == 0), tag='body')   # why: each course rests on the one below
+    if module: a.shift(-length / 2 * M, 0, 0)
     return a
 
 
@@ -92,7 +97,7 @@ def _helix(x0, x1, r, zc, pitch, y=0.0, n_per=20):
     return np.stack([x0 + (x1 - x0) * t + .05 * np.sin(th), y + r * np.cos(th), zc + r * np.sin(th)], 1) * M
 
 
-def wire_concertina(length=4.0):
+def wire_concertina(length=4.0, module=False):
     """BRIEF
       is:        a concertina-wire fence on steel screw pickets, the US Barbed Wire Fence
       does:      blocks infantry; any vehicle crushes it; wire cutters open a gap; no cover (sight passes through)
@@ -105,16 +110,20 @@ def wire_concertina(length=4.0):
     """
     a = Assembly(); a.note(f'concertina fence {length} m')
     R, ZC = .45, .47
-    for i, x in enumerate(np.linspace(0, length, 3)):              # why: a picket every 2 m holds the coil's stretch
+    pitch = length / round(length / .22)                            # a whole number of loops, so pieces join
+    xs = np.arange(0, length + 1e-6, 2.0)
+    if module and len(xs) > 1 and abs(xs[-1] - length) < 1e-6: xs = xs[:-1]   # the next piece brings the far picket
+    for i, x in enumerate(xs):              # why: a picket every 2 m holds the coil's stretch
         a.add(f'picket_{i}', sh.block((x - .03) * M, (x + .03) * M, -.03 * M, .03 * M, 0, 1.05 * M, 'steel'), grounded=True, tag='body')
         a.add(f'picket_eye_{i}', sh.block((x - .045) * M, (x + .045) * M, -.045 * M, .045 * M, .9 * M, .96 * M, 'steel'), tag='trim')   # why: the eye the top strand is tied through
-    a.extra(sh.sweep(_helix(0, length, R, ZC, .22), .02 * M, 'wire'), tag='body')   # why: the coil itself; loops ~22 cm apart when stretched
+    a.extra(sh.sweep(_helix(0, length, R, ZC, pitch), .03 * M, 'wire'), tag='body')   # why: the coil itself; loops ~22 cm apart when stretched
     for z in (.93, .05):                                           # why: top and ground strands lash the coil to every picket
-        a.extra(sh.sweep(sh.catenary((0, 0, z * M), (length * M, 0, z * M), .04 * M if z > .5 else 0, n=10), .015 * M, 'wire'), tag='body')
+        a.extra(sh.sweep(sh.catenary((0, 0, z * M), (length * M, 0, z * M), .04 * M if z > .5 else 0, n=max(10, int(length * 8))), .015 * M, 'wire'), tag='body')
+    if module: a.shift(-length / 2 * M, 0, 0)
     return a
 
 
-def wire_knife_rest(length=4.0):
+def wire_knife_rest(length=4.0, module=False, bay=None):
     """BRIEF
       is:        a knife rest (Spanischer Reiter): timber X-trestles joined by a ridge pole and laced with barbed wire,
                  the German Barbed Wire Fence
@@ -128,17 +137,19 @@ def wire_knife_rest(length=4.0):
     """
     a = Assembly(); a.note(f'knife rest {length} m')
     xs = np.linspace(0, length, 4); X = .9; SPAN = .62              # why: four trestles, ~1.33 m apart; crotch 0.9 m up
-    for i, x in enumerate(xs):
+    if bay: xs = np.arange(0, length + 1e-6, bay)
+    for i, x in enumerate(xs[:-1] if module else xs):               # module: the next piece brings the far trestle
         for s in (-1, 1):                                           # why: two poles crossed make each trestle; the pair splay 1.2 m at the foot
             a.strut(f'leg_{i}_{s}', (x * M, s * SPAN * M, 0), (x * M, -s * .32 * M, 1.22 * M), .045 * M, 'timber', free=True, tag='body')
         a.add(f'crotch_{i}', sh.block((x - .06) * M, (x + .06) * M, -.06 * M, .06 * M, (X - .06) * M, (X + .06) * M, 'timber'), grounded=False, tag='trim')   # why: the nailed crossing the ridge pole rests in
-    a.add('ridge', sh.cyl((-.1 * M, 0, (X + .08) * M), ((length + .1) * M, 0, (X + .08) * M), .05 * M, 'timber'), tag='body')   # why: the long pole ties the trestles into one frame that can be dragged
+    a.add('ridge', Geometry.join([sh.cyl(((xs[i] - (0 if module or i else .1)) * M, 0, (X + .08) * M), ((xs[i + 1] + (0 if module or i < len(xs) - 2 else .1)) * M, 0, (X + .08) * M), .05 * M, 'timber') for i in range(len(xs) - 1)]), tag='body')   # why: the long pole ties the trestles into one frame that can be dragged
     for i in range(len(xs) - 1):                                    # why: wire laced leg to leg across each bay, on both faces, so there is no gap to crawl through
         x0, x1 = xs[i], xs[i + 1]
         for s in (-1, 1):
             for z0, z1 in ((.15, .75), (.75, .15), (.45, .45), (.15, .15)):
                 y0 = s * (SPAN - (SPAN + .32) * z0 / 1.22); y1 = s * (SPAN - (SPAN + .32) * z1 / 1.22)
                 a.extra(sh.sweep(np.array([(x0 * M, y0 * M, z0 * M), (x1 * M, y1 * M, z1 * M)]), .015 * M, 'wire'), tag='body')
+    if module: a.shift(-length / 2 * M, 0, 0)
     return a
 
 
@@ -235,7 +246,7 @@ def fighting_nest_de(seed=4):
             for side in ((-1, 1) if c < 2 else (0,)):
                 rr = r - c * .06 + side * sz * .38
                 s = sz * (.85 + .3 * rng.random())
-                g = sh.rock(s * M, 'stone_rough', seed=int(rng.integers(1e6)), detail=1, flatten=.55)
+                g = sh.rock(s * M, 'field_stone', seed=int(rng.integers(1e6)), detail=1, flatten=.55)
                 gs.append(g.rz(rng.random() * 360).move(rr * math.cos(ang) * M, rr * math.sin(ang) * M, z * M))
         a.add(f'course_{c}', Geometry.join(gs), grounded=(c == 0), tag='body')
     return a
@@ -252,7 +263,7 @@ VARIANTS = {
 }
 
 GREYS = {'sandbag': (196, 190, 176), 'wire': (60, 60, 60), 'steel': (95, 95, 98), 'timber': (120, 112, 100),
-         'stone_rough': (165, 165, 160), 'earth': (140, 132, 118), 'opening': (55, 55, 55)}
+         'stone_rough': (165, 165, 160), 'field_stone': (165, 165, 160), 'earth': (140, 132, 118), 'opening': (55, 55, 55)}
 
 
 if __name__ == '__main__':

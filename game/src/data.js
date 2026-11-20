@@ -188,6 +188,11 @@ const DATA = (() => {
     sandbags: { name: 'Sandbag Wall', time: 6, hp: 220, cover: 'heavy', len: 4, blocksVehicles: false, blocksInfantry: false, crushable: 'heavy' },
     wire:     { name: 'Barbed Wire', time: 3, hp: 120, cover: null, len: 4, blocksInfantry: true, crushable: 'any' },
     tanktrap: { name: 'Tank Trap', time: 9, hp: 750, cover: 'heavy', len: 2, blocksVehicles: true, blocksInfantry: false, crushable: null },
+    /* Garrisonable fighting positions (coh3stats.com, Nov 2026): US Engineers' Fighting Position 100 mp, 15 s; German
+       Pioneers' Fighting Nest 50 mp, 20 s. Either holds one infantry squad or an HMG team in heavy cover, and is
+       neutral when empty (any side can take it). Health is a stand-in: CoH3's value isn't published. */
+    us_position: { name: 'Fighting Position', side: 'us', point: true, cost: { mp: 100 }, time: 15, hp: 600, size: 3.6, art: 'position_us', standIn: 'health' },
+    de_position: { name: 'Fighting Nest', side: 'de', point: true, cost: { mp: 50 }, time: 20, hp: 500, size: 3.6, art: 'position_de', standIn: 'health' },
   };
 
   const ABILITIES = {

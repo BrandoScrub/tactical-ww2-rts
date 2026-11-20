@@ -341,6 +341,17 @@ const SIM = (() => {
       pay(P, def.cost);
       const b = placeBuilding(G, o.what, sq.owner, o.x, o.y, 0); b.hp = def.hp * .1;
       sq.buildQueue = [{ kind: 'building', id: b.id }];
+    } else if (D.DEFENCES[o.what] && D.DEFENCES[o.what].point) {
+      const def = D.DEFENCES[o.what];
+      const why = canPit(G, sq.owner, o.what, o.x, o.y); if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return; }
+      if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return; }
+      pay(P, def.cost);
+      const foe = hqOf(G, 1 - sq.owner), face = o.face != null ? o.face : foe ? Math.atan2(foe.y - o.y, foe.x - o.x) : sq.heading;
+      const h = G.map.addPit(o.x, o.y, { ...def, id: o.what }, sq.owner, face);
+      // anyone standing where it is dug steps out of the way
+      const nav = MAP.navGrids(G.map).inf;
+      for (const e of G.ents) if (e.type === 'squad' && !e.dead && e.garrison == null) for (const m of e.models) if (m.alive && Math.hypot(m.x - h.x, m.y - h.y) < h.w / 2 + .2) { const q = MAP.nearestOpen(nav, G.map, m.x, m.y); m.x = q.x; m.y = q.y; m.spath = null; }
+      sq.buildQueue = [{ kind: 'pit', id: h.id }];
     } else if (D.DEFENCES[o.what]) {
       const def = D.DEFENCES[o.what];
       const x2 = o.x2 == null ? o.x + Math.cos(sq.heading + Math.PI / 2) * def.len : o.x2, y2 = o.y2 == null ? o.y + Math.sin(sq.heading + Math.PI / 2) * def.len : o.y2;
@@ -355,6 +366,18 @@ const SIM = (() => {
     } else return;
     sq.order = { type: 'build' }; sq.path = null; sq.slots = null; sq.retreating = false;
   }
+  /* where a fighting position can go: the faction's own kind, on open ground, clear of houses and other positions */
+  function canPit(G, owner, id, x, y) {
+    const def = D.DEFENCES[id]; if (!def || !def.point) return 'Unknown';
+    if (def.side !== G.players[owner].side) return 'Not this army';
+    const m = G.map, r = def.size / 2 + .3, nav = MAP.navGrids(m).inf;
+    if (x < r || y < r || x > m.w - r || y > m.h - r) return 'Off the map';
+    for (const h of m.houses) if (!h.dead && Math.abs(h.x - x) < (h.w + def.size) / 2 + .6 && Math.abs(h.y - y) < (h.d + def.size) / 2 + .6) return 'Too close to a building';
+    for (const b of G.ents) if (b.type === 'building' && !b.dead && Math.abs(b.x - x) < b.w / 2 + r + 1 && Math.abs(b.y - y) < b.d / 2 + r + 1) return 'Too close to a building';
+    for (let a = 0; a < 8; a++) { const px = x + Math.cos(a * Math.PI / 4) * r * .8, py = y + Math.sin(a * Math.PI / 4) * r * .8; if (!MAP.walkable(nav, m, px, py)) return 'Ground not clear'; }
+    if (!MAP.walkable(nav, m, x, y)) return 'Ground not clear';
+    return null;
+  }
   function buildReqMissing(G, owner, id) {
     const def = D.BUILDINGS[id], P = G.players[owner];
     for (const r of def.req || []) {
@@ -368,11 +391,12 @@ const SIM = (() => {
   function stepBuild(G, sq, dt) {
     while (sq.buildQueue.length) {
       const job = sq.buildQueue[0];
-      const tgt = job.kind === 'building' ? G.byId.get(job.id) : G.map.covers[job.id];
-      if (!tgt || tgt.dead || tgt.alive === false || (job.kind === 'building' ? tgt.built >= 1 : tgt.built >= 1)) { sq.buildQueue.shift(); continue; }
+      const pit = job.kind === 'pit', boxy = job.kind === 'building' || pit;
+      const tgt = job.kind === 'building' ? G.byId.get(job.id) : pit ? G.map.houses[job.id] : G.map.covers[job.id];
+      if (!tgt || tgt.dead || tgt.alive === false || tgt.built >= 1) { sq.buildQueue.shift(); continue; }
       // stand next to it
-      const px = job.kind === 'building' ? tgt.x : (tgt.ax + tgt.bx) / 2, py = job.kind === 'building' ? tgt.y : (tgt.ay + tgt.by) / 2;
-      const reach = job.kind === 'building' ? Math.max(tgt.w, tgt.d) / 2 + 3 : 3.5;
+      const px = boxy ? tgt.x : (tgt.ax + tgt.bx) / 2, py = boxy ? tgt.y : (tgt.ay + tgt.by) / 2;
+      const reach = boxy ? Math.max(tgt.w, tgt.d) / 2 + 3 : 3.5;
       const d = Math.hypot(sq.x - px, sq.y - py);
       // walk in to `reach`, keep working out to reach + 3 m: with one threshold the squad's anchor, drifting toward its
       // men, crossed it back and forth and the engineers flickered between walking and building
@@ -380,11 +404,15 @@ const SIM = (() => {
         sq.building = false;
         // a job it cannot reach for 20 s is dropped (the building or wall stays, another squad can finish it)
         sq.reachT = (sq.reachT || 0) + dt; if (sq.reachT > 20) { sq.reachT = 0; sq.buildQueue.shift(); event(G, sq.owner, 'error', 'Engineers cannot reach the construction site', px, py); continue; }
-        if (!sq.path || !sq.path.length) { const side = job.kind === 'building' ? nearEdge(sq, tgt) : { x: px - Math.sin(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6, y: py + Math.cos(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6 }; setPath(G, sq, side.x, side.y); } return true; }
+        if (!sq.path || !sq.path.length) { const side = boxy ? nearEdge(sq, tgt) : { x: px - Math.sin(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6, y: py + Math.cos(Math.atan2(tgt.by - tgt.ay, tgt.bx - tgt.ax)) * 1.6 }; setPath(G, sq, side.x, side.y); } return true; }
       sq.path = null; sq.building = true; sq.buildAt = { x: px, y: py }; sq.reachT = 0;
-      setWork(sq, job.kind === 'building' ? { kind: 'box', x: tgt.x, y: tgt.y, hw: tgt.w / 2, hd: tgt.d / 2 } : { kind: 'seg', ax: tgt.ax, ay: tgt.ay, bx: tgt.bx, by: tgt.by, x: px, y: py });
+      setWork(sq, pit ? { kind: 'ring', x: tgt.x, y: tgt.y, r: tgt.w / 2 } : job.kind === 'building' ? { kind: 'box', x: tgt.x, y: tgt.y, hw: tgt.w / 2, hd: tgt.d / 2 } : { kind: 'seg', ax: tgt.ax, ay: tgt.ay, bx: tgt.bx, by: tgt.by, x: px, y: py });
       const vb = sq.vet >= 2 ? 1.35 : 1, rate = dt * vb * Math.max(.4, sq.models.filter(m => m.alive).length / sq.maxModels);
-      if (job.kind === 'building') {
+      if (pit) {
+        const def = D.DEFENCES[tgt.defId];
+        tgt.built = Math.min(1, tgt.built + rate / def.time); tgt.hp = Math.min(tgt.maxHp, tgt.hp + tgt.maxHp * .9 * rate / def.time);
+        if (tgt.built >= 1) event(G, sq.owner, 'built', def.name + ' complete', tgt.x, tgt.y);
+      } else if (job.kind === 'building') {
         tgt.built = Math.min(1, tgt.built + rate / tgt.def.time); tgt.hp = Math.min(tgt.maxHp, tgt.hp + tgt.maxHp * .9 * rate / tgt.def.time);
         if (tgt.built >= 1) { G.players[tgt.owner].built.add(tgt.defId); event(G, tgt.owner, 'built', tgt.def.name + ' complete', tgt.x, tgt.y); }
       } else {
@@ -461,6 +489,11 @@ const SIM = (() => {
      (garrison) cover. Explosions grind the house down; at zero it collapses into rubble and throws them out hurt. */
   const GARRISON = { enterDist: 2.2, windowOut: .45, collapseDmg: 60, breachDmg: 40, breachSupp: .7 };
   function houseSlots(h, n) {
+    if (h.pit) {                                          // in a pit: round the inside of the parapet, the front first
+      const out = [], R = h.w / 2 - .85;
+      for (let k = 0; k < n; k++) { const a = h.face + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI * 2 / Math.max(n, 5)) * (k ? 1 : 0); out.push({ x: h.x + Math.cos(a) * R, y: h.y + Math.sin(a) * R, a }); }
+      return out;
+    }
     const faces = [[1, 0], [0, 1], [-1, 0], [0, -1]], out = [];
     const per = faces.map(([fx, fy]) => { const len = fx ? h.d : h.w, cnt = Math.max(1, Math.floor(len / 2.2)); return { fx, fy, len, cnt, used: 0 }; });
     for (let k = 0; k < n; k++) {
@@ -483,6 +516,7 @@ const SIM = (() => {
     if (!h || h.dead) return;
     if (h.occ != null && h.occ !== sq.id) { const o = G.byId.get(h.occ); if (o && !o.dead) { event(G, sq.owner, 'error', o.owner === sq.owner ? 'That building is already occupied' : 'Enemy inside: use Breach to clear it', h.x, h.y); return; } h.occ = null; }
     if (sq.garrison === h.id) return;
+    if (h.pit && h.built < 1) { event(G, sq.owner, 'error', 'Not finished yet', h.x, h.y); return; }
     if (sq.garrison != null) leaveHouse(G, sq, h.x, h.y);
     if (sq.crew && sq.crew.state !== 'packed') teardown(G, sq);
     sq.order = { type: 'garrison', house: h.id }; sq.forceTarget = null; sq.slots = null; sq.buildQueue = [];
@@ -499,11 +533,14 @@ const SIM = (() => {
   function enterHouse(G, sq, h) {
     sq.garrison = h.id; h.occ = sq.id; sq.path = null; sq.order = { type: 'idle' }; sq.slots = null;
     sq.x = h.x; sq.y = h.y; sq.moving = false;
+    // a team weapon in a fighting position sets up in it, its arc over the firing notch (CoH3: HMGs man them)
+    if (h.pit && sq.crew) { sq.crew.state = 'deployed'; sq.crew.x = h.x; sq.crew.y = h.y; sq.crew.heading = threatDir(G, sq, h.x, h.y) ?? h.face; }
     placeInHouse(G, sq, h);
     event(G, sq.owner, 'garrison', sq.def.name + ' garrisoned', h.x, h.y);
   }
   function placeInHouse(G, sq, h) {
     const al = sq.models.filter(m => m.alive), slots = houseSlots(h, al.length);
+    if (h.pit && sq.crew && sq.crew.state !== 'packed') al.forEach((m, k) => { const c = crewSlot(G, sq, k); const R = Math.hypot(c.x - h.x, c.y - h.y), lim = h.w / 2 - .7; slots[k] = R > lim ? { x: h.x + (c.x - h.x) * lim / R, y: h.y + (c.y - h.y) * lim / R, a: sq.crew.heading } : { x: c.x, y: c.y, a: sq.crew.heading }; });
     al.forEach((m, k) => { m.x = slots[k].x; m.y = slots[k].y; m.heading = slots[k].a; m.aim = slots[k].a; m.vx = 0; m.inside = true; m.spath = null; m.goalX = null; });
     sq.houseN = al.length;
   }
@@ -511,6 +548,7 @@ const SIM = (() => {
     const h = houseOf(G, sq); if (!h) return;
     if (h.occ === sq.id) h.occ = null;
     sq.garrison = null;
+    if (h.pit && sq.crew) sq.crew.state = 'packed';      // the gun comes out of the pit on the men's backs
     const nav = MAP.navGrids(G.map).inf, d = doorOf(h, tx == null ? h.x + 1 : tx, ty == null ? h.y : ty);
     const o = MAP.nearestOpen(nav, G.map, d.x, d.y); sq.x = o.x; sq.y = o.y;
     const al = sq.models.filter(m => m.alive);
@@ -521,7 +559,8 @@ const SIM = (() => {
     const h = houseOf(G, sq);
     if (!h || h.dead) { sq.garrison = null; for (const m of sq.models) m.inside = false; return; }
     const n = sq.models.filter(m => m.alive).length;
-    if (n !== sq.houseN) placeInHouse(G, sq, h);
+    const hd = h.pit && sq.crew ? sq.crew.heading : null;      // a gun in a pit turned to a new arc: its crew follow it round
+    if (n !== sq.houseN || hd !== sq.pitHead) { sq.pitHead = hd; placeInHouse(G, sq, h); }
     for (const m of sq.models) if (m.alive) m.vx = 0;
     sq.moving = false; sq.stillT += dt; sq.path = null;
   }
@@ -532,7 +571,11 @@ const SIM = (() => {
     if (h.hp > 0) return;
     const occ = h.occ != null ? G.byId.get(h.occ) : null;
     MAP.collapseHouse(G.map, h);
-    G.fx.push({ kind: 'boom', x: h.x, y: h.y, t: G.t, big: 2.2, life: 2 });
+    G.fx.push({ kind: 'boom', x: h.x, y: h.y, t: G.t, big: h.pit ? 1.2 : 2.2, life: 2 });
+    if (h.pit) {                                          // a position caves in: the men are thrown out, shaken, not crushed
+      if (occ && !occ.dead) { occ.garrison = null; leaveHouse(G, Object.assign(occ, { garrison: h.id }), h.x + Math.cos(h.face + Math.PI) * 4, h.y + Math.sin(h.face + Math.PI) * 4); event(G, occ.owner, 'lost', D.DEFENCES[h.defId].name + ' destroyed', h.x, h.y); }
+      h.occ = null; return;
+    }
     if (occ && !occ.dead) {
       occ.garrison = null;
       leaveHouse(G, Object.assign(occ, { garrison: h.id }), occ.owner ? h.x - 5 : h.x + 5, occ.owner ? h.y + 5 : h.y - 5);
@@ -1102,7 +1145,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, canPit, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, connected, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
