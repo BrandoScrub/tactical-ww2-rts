@@ -148,11 +148,12 @@ const HUD = (() => {
         out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };
       });
       out[7] = { img: ico('rally'), label: 'Set rally point', tip: '<b>Set rally point</b><div>New units walk here after they are produced.</div>', act: () => { ui.mode = { type: 'rally', id: e.id }; } };
-      // Wehrmacht: the HQ card holds one place-building button per tier (reference board 08, item 6)
-      if (e.def.retreat && P.side === 'de') P.F.buildings.forEach((bid, i) => {
+      // the HQ card holds one place-building button per tier (reference board 08, item 6): both armies order their base
+      // buildings here and they raise themselves (CoH3); engineers and pioneers don't build them
+      if (e.def.retreat) P.F.buildings.forEach((bid, i) => {
         const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
         if (why === 'Already built') return;
-        out[8 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div><div class="note">Placed here, raised by Pioneers.</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, null) };
+        out[8 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div><div class="note">Ordered from the HQ; it builds itself.</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, e.id) };
       });
       return out;
     }
@@ -161,11 +162,6 @@ const HUD = (() => {
       defs.forEach((d, i) => { const def = D.DEFENCES[d]; out[i] = { img: ico(d), label: def.name, tip: `<b>${def.name}</b><div>Free: ${def.time}s a section. Drag to lay a line.</div><div>${def.cover ? def.cover[0].toUpperCase() + def.cover.slice(1) + ' cover. ' : ''}${def.blocksInfantry ? 'Stops infantry; vehicles crush it. ' : ''}${def.blocksVehicles ? 'Stops vehicles; heavy tanks break it. ' : ''}</div>`, act: () => { ui.mode = { type: 'line', what: d, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; } }; });
       { const pid = P.side + '_position', def = D.DEFENCES[pid], why = !SIM.canAfford(P, def.cost) ? 'Not enough resources' : null;
         out[3] = { img: ico('position'), label: def.name, tip: `<b>${def.name}</b><div>Holds one infantry squad or a machine-gun team in heavy cover; an HMG inside fires over the front. Empty, either side can take it.</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => { ui.mode = { type: 'pit', what: pid, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap where to dig it'); } } }; }
-      if (P.side === 'us') P.F.buildings.forEach((bid, i) => {
-        const def = D.BUILDINGS[bid], why = SIM.buildReqMissing(G, 0, bid) || (!SIM.canAfford(P, def.cost) ? 'Not enough resources' : null);
-        if (why === 'Already built') return;
-        out[4 + i] = { img: buildingIcon(bid), label: def.name, tip: `<b>${def.name}</b><div>Produces: ${def.produce.map(u => SIM.unitDef(u).name).join(', ')}</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => startPlace(bid, e.id) };
-      });
       out[11] = { img: ico('back'), label: 'Back', tip: '<b>Back</b><div>Return to orders.</div>', act: () => { ui.page = 'main'; } };
       return out;
     }
@@ -189,16 +185,14 @@ const HUD = (() => {
       }
       if (e.def.builder) {
         out[10] = { img: ico('repair'), label: 'Repair', tip: '<b>Repair</b><div>Right-click a damaged vehicle or building of yours.</div>', act: () => { ui.mode = { type: 'repair', ids: sel.filter(s => s.def.builder).map(s => s.id) }; } };
-        out[11] = { img: ico('build'), label: 'Construct', tip: '<b>Construct</b><div>Field defences' + (P.side === 'us' ? ' and base buildings' : '') + '.</div>', act: () => { ui.page = 'build'; } };
+        out[11] = { img: ico('build'), label: 'Construct', tip: '<b>Construct</b><div>Field defences and fighting positions. Base buildings are ordered from the HQ.</div>', act: () => { ui.page = 'build'; } };
       }
     }
     return out;
   }
   function pressSlot(i) { const s = cardFor()[i]; if (!s || s.disabled) { if (s && s.why) flash(s.why); return; } s.act(); }
-  function startPlace(bid, builderId) {
-    let ids = builderId ? [builderId] : null;
-    if (!ids) { const bs = G.ents.filter(e => e.type === 'squad' && e.owner === 0 && !e.dead && e.def.builder); if (!bs.length) { flash('No Pioneers to build it'); return; } bs.sort((a, b) => (a.order.type === 'build') - (b.order.type === 'build')); ids = [bs[0].id]; }
-    ui.mode = { type: 'place', what: bid, ids };
+  function startPlace(bid, hqId) {
+    ui.mode = { type: 'place', what: bid, hq: hqId };
     if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap or drag to place it. Green fits, red shows why not.'); }
   }
   function slotColAct(a) {
@@ -255,7 +249,7 @@ const HUD = (() => {
       const n = e.type === 'squad' ? e.models.filter(m => m.alive).length : '';
       const st = e.type === 'squad' ? (e.retreating ? '<em class="ret"></em>' : e.suppState ? '<em class="sup">!</em>' : G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '') : (G.t - e.lastHit < 4 ? '<em class="hit">!</em>' : '');
       const hpf = e.type === 'vehicle' ? e.hp / e.maxHp : e.models.reduce((a, m) => a + (m.alive ? m.hp : 0), 0) / (e.def.hp * e.maxModels);
-      return `<div class="ru ${ui.selected.has(e.id) ? 'sel' : ''}" data-id="${e.id}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph)}">${n !== '' ? `<b>${n}</b>` : ''}${e.vet ? `<u>${'&#9733;'.repeat(e.vet)}</u>` : ''}${groupOf(e.id) ? `<span class="grp">${groupOf(e.id)}</span>` : ''}${st}<i style="width:${Math.round(hpf * 100)}%"></i></div>`;
+      return `<div class="ru ${ui.selected.has(e.id) ? 'sel' : ''}" data-id="${e.id}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph)}">${n !== '' ? `<b>${n}</b>` : ''}${e.vet ? `<u>${'&#9733;'.repeat(e.vet)}</u>` : ''}${groupOf(e.id) ? `<span class="grp">${groupOf(e.id)}</span>` : ''}${st}<i style="width:${Math.round(hpf * 100)}%;background:${RENDER.HEALTH_COL(hpf)}"></i></div>`;
     }).join('');
     if (html !== el.roster._u) { el.roster.querySelector('.r-units').innerHTML = html; el.roster._u = html; }
     const bs = G.ents.filter(e => e.owner === 0 && !e.dead && e.type === 'building');
@@ -268,8 +262,10 @@ const HUD = (() => {
     if (!sel.length) { put(body, '<div class="empty">Nothing selected</div>'); pc.getContext('2d').clearRect(0, 0, 128, 128); put(sc, ''); lastPanelKey = ''; return; }
     if (sel.length > 1) {
       const key = 'multi:' + sel.map(e => e.id).join(',');
-      put(body, `<div class="multi">${sel.slice(0, 18).map(e => `<div class="mt o${e.owner}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph || 'house')}"><b>${e.type === 'squad' ? e.models.filter(m => m.alive).length : ''}</b></div>`).join('')}</div>`);
-      if (key !== lastPanelKey) { pc.getContext('2d').clearRect(0, 0, 128, 128); lastPanelKey = key; }
+      const hf = e => e.type === 'squad' ? e.models.reduce((a, m) => a + (m.alive ? m.hp : 0), 0) / (e.def.hp * e.maxModels) : e.type === 'building' && e.built < 1 ? e.built : e.hp / e.maxHp;
+      put(body, `<div class="own">${sel.length} selected</div><div class="multi">${sel.slice(0, 18).map(e => `<div class="mt o${e.owner}" title="${e.def.name}"><img src="${glyphIcon(e.def.glyph || 'house')}"><b>${e.type === 'squad' ? e.models.filter(m => m.alive).length : ''}</b><i style="width:${Math.round(U.clamp(hf(e), 0, 1) * 100)}%;background:${RENDER.HEALTH_COL(hf(e))}"></i></div>`).join('')}</div>`);
+      // the portrait shows the first unit of the selection (an empty frame looked broken)
+      if (key !== lastPanelKey) { const f = sel[0]; if (f.type === 'building') drawBuildingPortrait(pc, f); else RENDER.portrait(G, f, pc); lastPanelKey = key; }
       put(sc, ''); return;
     }
     const e = sel[0], P = G.players[e.owner] || { F: { name: 'Abandoned' } }, own = e.owner === 0;
@@ -281,7 +277,7 @@ const HUD = (() => {
       put(body, name + (e.def.reinforce ? '<div class="hl">Can reinforce infantry.</div>' : '') +
         `<div class="desc">${e.built < 1 ? 'Under construction: ' + Math.round(e.built * 100) + '%' : 'Produces: ' + e.def.produce.map(u => SIM.unitDef(u).name).join(', ') + '.'}</div>` +
         (own && e.queue.length ? `<div class="queue">${e.queue.map((q, i) => `<div class="qi" data-q="${i}" title="Click to cancel"><img src="${unitIcon(q.unit)}"><i style="width:${i ? 0 : Math.round(q.t / q.total * 100)}%"></i></div>`).join('')}</div>` : '') +
-        `<div class="hp"><i style="width:${hp * 100}%"></i><span>${Math.ceil(e.hp)} / ${e.maxHp}</span></div>`);
+        `<div class="hp"><i style="width:${hp * 100}%;background:${RENDER.HEALTH_COL(hp)}"></i><span>${Math.ceil(e.hp)} / ${e.maxHp}</span></div>`);
       put(sc, own && e.def.retreat ? `<button class="toggle ${P.autoReinforce ? 'on' : ''}" data-act="reinforce" title="Automatic reinforcement: squads that have lost men refill near base buildings and pay manpower for each man. Toggle off to keep the manpower."><img src="${ico('reinforce')}"><span class="k">T</span></button>` : '');
       return;
     }
@@ -298,7 +294,7 @@ const HUD = (() => {
       `<div class="line">${strength}${(() => { const h = MAP.hAt(G.map, e.x, e.y); return h >= 1.5 ? `<span class="elev" title="Elevation: sees further; from 2.5 m above a target it fires over the target's cover">&#9650; ${h.toFixed(0)} m</span>` : ''; })()}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state">${state}</span>` : ''}</div>` +
       `<div class="weap">${weapons.join(' &middot; ')}</div>` +
       (e.type === 'vehicle' ? `<div class="armor">Armour ${e.def.armor.join(' / ')} (front / side / rear)</div>` : '') +
-      `<div class="hp"><i style="width:${Math.round(hpf * 100)}%"></i></div>`);
+      `<div class="hp"><i style="width:${Math.round(hpf * 100)}%;background:${RENDER.HEALTH_COL(hpf)}"></i></div>`);
     put(sc, (e.upgrades && e.upgrades.size ? [...e.upgrades].map(u => `<div class="eq" title="${(e.def.upgrades.find(x => x.id === u) || {}).name}"><img src="${ico(u === 'flame' ? 'flame' : 'lmg')}"></div>`).join('') : ''));
   }
   function drawBuildingPortrait(cv, b) {
@@ -370,9 +366,23 @@ const HUD = (() => {
     }
     // alerts
     for (const al of P.alerts) if (G.t - al.t < 4 && (al.kind === 'attack' || al.kind === 'lost')) { const [a, b] = mmToScreen(al.x, al.y); g.strokeStyle = '#fff'; g.lineWidth = 2; const s = 6 + (G.t * 6 % 4); g.strokeRect(a - s, b - s, s * 2, s * 2); }
-    // camera footprint
-    const corners = [[0, 0], [RENDER.W, 0], [RENDER.W, RENDER.H - 230], [0, RENDER.H - 230]].map(([x, y]) => RENDER.toWorld(x, y)).map(([x, y]) => mmToScreen(x, y));
-    g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1.2; g.beginPath(); corners.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
+    // where selected units are going, queued stops included (reference board: order path on the minimap)
+    g.setLineDash([2, 2]); g.lineWidth = 1;
+    for (const e of selEnts()) {
+      if (e.owner !== 0 || e.type === 'building') continue;
+      const stops = []; if (e.path && e.path.length) stops.push(e.path[e.path.length - 1]); for (const q of e.queue || []) if (q.x != null) stops.push(q);
+      if (!stops.length) continue;
+      g.strokeStyle = 'rgba(200,240,255,.85)'; g.beginPath(); let [a, b] = mmToScreen(e.x, e.y); g.moveTo(a, b);
+      for (const q of stops) { [a, b] = mmToScreen(q.x, q.y); g.lineTo(a, b); } g.stroke();
+      g.fillStyle = '#e8f8ff'; for (const q of stops) { [a, b] = mmToScreen(q.x, q.y); g.fillRect(a - 1.5, b - 1.5, 3, 3); }
+    }
+    g.setLineDash([]);
+    // camera footprint: the whole screen, as the ground the camera shows (the HUD floats over the view, it doesn't crop it)
+    const corners = [[0, 0], [RENDER.W, 0], [RENDER.W, RENDER.H], [0, RENDER.H]].map(([x, y]) => RENDER.toWorld(x, y)).map(([x, y]) => mmToScreen(x, y));
+    g.save(); g.beginPath(); g.arc(c.width / 2, c.height / 2, c.width / 2, 0, 7); g.clip();
+    g.strokeStyle = 'rgba(0,0,0,.6)'; g.lineWidth = 3; g.beginPath(); corners.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,.95)'; g.lineWidth = 1.4; g.stroke();
+    g.restore();
   }
   /* event position on the minimap in canvas pixels, whatever size the HUD is drawn at */
   function mmEventWorld(e) { const r = el.mmc.getBoundingClientRect(); return mmToWorld((e.clientX - r.left) * el.mmc.width / r.width, (e.clientY - r.top) * el.mmc.height / r.height); }
@@ -391,8 +401,18 @@ const HUD = (() => {
   const mouse = { x: -1, y: -1, down: false, drag: null, rdown: null, inCanvas: false, moved: false };
   /* the house under the cursor: test the ground point and the points behind the walls and roof as drawn */
   function houseAtScreen(sx, sy) {
-    for (const z of [0, 1.5, 3, 4.5, 6]) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .3); if (h && FOG.shownAt(G, h.x, h.y)) return h; }
+    // houses are drawn whatever the fog (they are part of the map), so they can be picked through it; a fighting
+    // position only once it has been seen. Tested from the ground up to the house's own roof line, so ground behind a
+    // low cottage is still ground
+    for (let z = 0; z <= 8; z += .5) { const [wx, wy] = RENDER.toWorld(sx, sy + z * 24 * RENDER.cam.k); const h = MAP.houseAt(G.map, wx, wy, .4); if (h && z <= houseTop(h) && (!h.pit || FOG.shownAt(G, h.x, h.y))) return h; }
     return null;
+  }
+  /* how tall a house is drawn (m): from its sprite (the sprite's top sits origin-y px above the footprint's back corner,
+     24 px a metre), else the painted house's ridge; a fighting position is a low parapet */
+  function houseTop(h) {
+    if (h.pit) return 1.2;
+    const L = h.art && RENDER.lib && RENDER.lib[h.art], st = L && L.m && L.m.states && L.m.states.normal;
+    return st && st.origin ? st.origin[1] / 24 + .3 : 6.4;
   }
   /* an abandoned gun or dropped weapon under the cursor */
   function dropAt(sx, sy) {
@@ -414,6 +434,8 @@ const HUD = (() => {
     return best;
   }
   function pointAt(sx, sy) { const [wx, wy] = RENDER.toWorld(sx, sy); for (const p of G.map.points) { const [x, y] = RENDER.toScreen(p.x, p.y, 8.5); if ((x - sx) ** 2 + (y - sy) ** 2 < 15 * 15 || U.dist2(wx, wy, p.x, p.y) < 2.5 * 2.5) return p; } return null; }
+  /* the floating point icon itself (not the ground): clicking it sends the selection to take the point */
+  function pointIconAt(sx, sy) { const r = ui.touch ? 26 : 17; for (const p of G.map.points) { const [x, y] = RENDER.toScreen(p.x, p.y, 8.5); if ((x - sx) ** 2 + (y - sy) ** 2 < r * r) return p; } return null; }
   function overHud(t) { return t !== canvasEl; }
   let pageBound = false;
   function bindInput() {
@@ -492,19 +514,18 @@ const HUD = (() => {
     if (m) {
       const ids = m.ids || selEnts().filter(s => s.owner === 0).map(s => s.id);
       if (m.type === 'attackMove' || m.type === 'reverse') { issue(G, ids, { type: m.type, x: wx, y: wy }, e.shiftKey); marker(wx, wy, m.type === 'attackMove' ? '#ff6a5a' : '#ffd36a'); pinnedNote(ids); if (!e.shiftKey) ui.mode = null; return; }
-      if (m.type === 'ability') { const ent = G.byId.get(ids[0]), hb = m.id === 'breach' ? houseAtScreen(e.clientX, e.clientY) : null; if (ent) issue(G, [ent.id], { type: 'ability', id: m.id, x: hb ? hb.x : wx, y: hb ? hb.y : wy }); ui.mode = null; return; }
+      if (m.type === 'ability') { const ent = G.byId.get(ids[0]), hb = m.id === 'breach' ? houseAtScreen(e.clientX, e.clientY) : null; if (ent) issue(G, [ent.id], { type: 'ability', id: m.id, x: hb ? hb.x : wx, y: hb ? hb.y : wy }, e.shiftKey); ui.mode = null; return; }
       if (m.type === 'rally') { issue(G, [m.id], { type: 'rally', x: wx, y: wy }); ui.mode = null; return; }
       if (m.type === 'place') {
         const err = SIM.canPlace(G, 0, m.what, wx, wy) || SIM.buildReqMissing(G, 0, m.what) || (!SIM.canAfford(G.players[0], DATA.BUILDINGS[m.what].cost) ? 'Not enough resources' : null);
         if (err) { flash(err); return; }
-        const builders = m.ids.filter(id => { const b = G.byId.get(id); return b && !b.dead; });
-        if (!builders.length) { flash('No engineers left to build it'); ui.mode = null; return; }
-        issue(G, builders, { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; ui.selected = new Set(builders); flash(DATA.BUILDINGS[m.what].name + ' placed'); return;
+        const hq = G.byId.get(m.hq) || SIM.hqOf(G, 0); if (!hq || hq.dead) { flash('No headquarters'); ui.mode = null; return; }
+        issue(G, [hq.id], { type: 'construct', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; flash(DATA.BUILDINGS[m.what].name + ' ordered: it builds itself'); return;
       }
-      if (m.type === 'pit') { if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const why = SIM.canPit(G, 0, m.what, wx, wy); if (why) { flash(why); return; } issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: wx, y: wy }); ui.mode = null; ui.page = 'main'; return; }
-      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
+      if (m.type === 'pit') { if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const why = SIM.canPit(G, 0, m.what, wx, wy); if (why) { flash(why); return; } issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: wx, y: wy }, e.shiftKey); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } return; }
+      if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }, e.shiftKey); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
       if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
-      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }); ui.mode = null; return; }
+      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }, e.shiftKey); ui.mode = null; return; }
     }
     // box or click select
     const d = mouse.drag;
@@ -530,41 +551,44 @@ const HUD = (() => {
     const sel = selEnts().filter(s => s.owner === 0); if (!sel.length) return;
     const [wx, wy] = RENDER.toWorld(e.clientX, e.clientY), r = mouse.rdown, dragged = r && Math.hypot(e.clientX - r.x, e.clientY - r.y) > 12;
     if (sel[0].type === 'building') { issue(G, sel.map(s => s.id), { type: 'rally', x: wx, y: wy }); return; }
-    const units = sel.filter(s => s.type !== 'building').map(s => s.id);
+    const units = sel.filter(s => s.type !== 'building').map(s => s.id), Q = !!e.shiftKey;
+    // a point's icon: go and take it (squads spread inside the circle)
+    const pi = !dragged ? pointIconAt(e.clientX, e.clientY) : null;
+    if (pi) { issue(G, units, { type: 'move', x: pi.x, y: pi.y, point: pi.id }, Q); marker(pi.x, pi.y, '#ffe27a'); pinnedNote(units); if (!ui.touch) flash(pi.owner === 0 ? 'Holding the point' : 'Capturing the point'); return; }
     const t = !dragged && entAt(e.clientX, e.clientY);
     // an abandoned vehicle: the nearest infantry squad climbs in; anything else fires on it
     if (t && t.owner < 0 && t.type === 'vehicle') {
       const inf = sel.filter(s => SIM.canPickUp(s) && s.models.filter(m => m.alive).length >= 2).sort((a, b) => U.dist2(a.x, a.y, t.x, t.y) - U.dist2(b.x, b.y, t.x, t.y));
-      if (inf.length) { issue(G, [inf[0].id], { type: 'recrew', target: t.id }); marker(t.x, t.y, '#ffe27a'); return; }
-      issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return;
+      if (inf.length) { issue(G, [inf[0].id], { type: 'recrew', target: t.id }, Q); marker(t.x, t.y, '#ffe27a'); return; }
+      issue(G, units, { type: 'attack', target: t.id }, Q); marker(wx, wy, '#ff6a5a'); return;
     }
-    if (t && t.owner === 1) { issue(G, units, { type: 'attack', target: t.id }); marker(wx, wy, '#ff6a5a'); return; }
-    if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp || t && t.type === 'building' && t.owner === 0 && t.built < 1) {
+    if (t && t.owner === 1) { issue(G, units, { type: 'attack', target: t.id }, Q); marker(wx, wy, '#ff6a5a'); return; }
+    if (t && t.owner === 0 && t.type !== 'squad' && t.hp < t.maxHp && !(t.type === 'building' && t.built < 1)) {
       const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
-      if (builders.length) { if (t.built < 1) { for (const id of builders) { const b = G.byId.get(id); b.buildQueue = [{ kind: 'building', id: t.id }]; b.order = { type: 'build' }; } } else issue(G, builders, { type: 'repair', target: t.id }); return; }
+      if (builders.length) { issue(G, builders, { type: 'repair', target: t.id }, Q); return; }
     }
     // right-click an abandoned gun or a dropped weapon: the nearest squad that can use it goes for it
     const dd = !dragged && !t ? dropAt(e.clientX, e.clientY) : null;
     if (dd) {
       const can = sel.filter(s => SIM.canPickUp(s)).sort((a, b) => U.dist2(a.x, a.y, dd.x, dd.y) - U.dist2(b.x, b.y, dd.x, dd.y));
-      if (can.length) { issue(G, [can[0].id], { type: 'pickup', drop: dd.id }); marker(dd.x, dd.y, '#ffe27a'); return; }
+      if (can.length) { issue(G, [can[0].id], { type: 'pickup', drop: dd.id }, Q); marker(dd.x, dd.y, '#ffe27a'); return; }
     }
     // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
     const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
     if (hh && (hh.occ == null || (G.byId.get(hh.occ) || {}).owner === 0)) {
       const inf = sel.filter(s => s.type === 'squad' && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
       if (inf.length) {
-        if (hh.occ == null || hh.occ === inf[0].id) issue(G, [inf[0].id], { type: 'garrison', house: hh.id }); else flash('That building is already occupied');
-        const rest = units.filter(id => id !== inf[0].id); if (rest.length) issue(G, rest, { type: 'move', x: hh.x + (hh.x < 100 ? 6 : -6), y: hh.y });
+        if (hh.occ == null || hh.occ === inf[0].id) issue(G, [inf[0].id], { type: 'garrison', house: hh.id }, Q); else flash('That building is already occupied');
+        const rest = units.filter(id => id !== inf[0].id); if (rest.length) issue(G, rest, { type: 'move', x: hh.x + (hh.x < 100 ? 6 : -6), y: hh.y }, Q);
         marker(hh.x, hh.y, '#7fe0ff'); return;
       }
     }
     if (dragged) {
       // right-drag: move there and face the drag direction (team weapons set up that way)
       const [sx, sy] = RENDER.toWorld(r.x, r.y), face = Math.atan2(wy - sy, wx - sx);
-      issue(G, units, { type: 'move', x: sx, y: sy, face }, e.shiftKey); marker(sx, sy, '#7fe0ff'); pinnedNote(units); return;
+      issue(G, units, { type: 'move', x: sx, y: sy, face }, Q); marker(sx, sy, '#7fe0ff'); pinnedNote(units); return;
     }
-    issue(G, units, { type: 'move', x: wx, y: wy }, e.shiftKey); marker(wx, wy, e.shiftKey ? '#b8f0ff' : '#7fe0ff'); pinnedNote(units);
+    issue(G, units, { type: 'move', x: wx, y: wy }, Q); marker(wx, wy, Q ? '#b8f0ff' : '#7fe0ff'); pinnedNote(units);
   }
   function marker(x, y, col) { G.fx.push({ kind: 'order', x, y, t: G.t, life: .8, col }); }
   /* pinned squads only take a retreat order: say so instead of silently ignoring the click */
@@ -580,16 +604,18 @@ const HUD = (() => {
     const m = ui.mode;
     if (m) {
       if (m.type === 'line' && !m.start) { const [wx, wy] = RENDER.toWorld(x, y); m.start = { x: wx, y: wy }; flash('Tap where the line ends'); return; }
-      mouse.drag = null; leftUp(fake(x, y)); return;
+      mouse.drag = null; leftUp(fake(x, y, ui.queue)); return;
     }
     const t = entAt(x, y), mine = selEnts().filter(s => s.owner === 0);
-    if (t && t.owner === 0 && !(mine.length && mine.some(s => s.def && s.def.builder) && t.type !== 'squad' && (t.hp < t.maxHp || t.built < 1) && !ui.multi)) { mouse.drag = null; leftUp(fake(x, y, ui.multi)); return; }
-    if (mine.length && mine[0].type !== 'building' || mine.length && mine[0].type === 'building' && !t) { rightUp(fake(x, y)); return; }
+    // a point's icon with units selected: take it
+    if (mine.length && mine[0].type !== 'building' && pointIconAt(x, y)) { rightUp(fake(x, y, ui.queue)); return; }
+    if (t && t.owner === 0 && !(mine.length && mine.some(s => s.def && s.def.builder) && t.type !== 'squad' && t.hp < t.maxHp && !(t.built < 1) && !ui.multi)) { mouse.drag = null; leftUp(fake(x, y, ui.multi)); return; }
+    if (mine.length && mine[0].type !== 'building' || mine.length && mine[0].type === 'building' && !t) { rightUp(fake(x, y, ui.queue)); return; }
     mouse.drag = null; leftUp(fake(x, y));
   }
   function longPressAt(x, y) {
     const ids = selEnts().filter(s => s.owner === 0 && s.type !== 'building').map(s => s.id); if (!ids.length) return;
-    const [wx, wy] = RENDER.toWorld(x, y); issue(G, ids, { type: 'attackMove', x: wx, y: wy }); marker(wx, wy, '#ff6a5a'); flash('Attack move'); pinnedNote(ids);
+    const [wx, wy] = RENDER.toWorld(x, y); issue(G, ids, { type: 'attackMove', x: wx, y: wy }, !!ui.queue); marker(wx, wy, '#ff6a5a'); flash(ui.queue ? 'Attack move (queued)' : 'Attack move'); pinnedNote(ids);
   }
   function bindTouch() {
     bindTouchHud();
@@ -650,13 +676,14 @@ const HUD = (() => {
     el.mmc.addEventListener('pointerup', () => { el.mmc._drag = false; });
     el.mmc.style.touchAction = 'none';
     // touch toolbar
-    el.tbar = h('div', 'tbar', `<button data-t="box" title="Box select: drag on the field">&#9634;<small>Box</small></button><button data-t="multi" title="Add to selection">+<small>Add</small></button><button data-t="clear" title="Deselect">&#10005;<small>Clear</small></button><button data-t="hq" title="Jump to HQ">&#8962;<small>HQ</small></button><button data-t="full" title="Full screen">&#9974;<small>Full</small></button>`);
+    el.tbar = h('div', 'tbar', `<button data-t="box" title="Box select: drag on the field">&#9634;<small>Box</small></button><button data-t="multi" title="Add to selection">+<small>Add</small></button><button data-t="queue" title="Queue orders: each order waits for the one before it">&#8677;<small>Queue</small></button><button data-t="clear" title="Deselect">&#10005;<small>Clear</small></button><button data-t="hq" title="Jump to HQ">&#8962;<small>HQ</small></button><button data-t="full" title="Full screen">&#9974;<small>Full</small></button>`);
     $('#hud').appendChild(el.tbar);
     el.tbar.addEventListener('click', ev => {
       const b = ev.target.closest('[data-t]'); if (!b) return;
       const t = b.dataset.t;
       if (t === 'box') ui.boxMode = !ui.boxMode;
       else if (t === 'multi') ui.multi = !ui.multi;
+      else if (t === 'queue') { ui.queue = !ui.queue; flash(ui.queue ? 'Queue on: orders wait their turn' : 'Queue off'); }
       else if (t === 'clear') { ui.selected.clear(); ui.mode = null; ui.page = 'main'; }
       else if (t === 'hq') centreOn(SIM.hqOf(G, 0));
       else if (t === 'full') { try { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else (d.requestFullscreen || d.webkitRequestFullscreen).call(d).catch(() => flash('Full screen is not allowed here')); } catch (x) { flash('Full screen is not allowed here'); } }
@@ -664,7 +691,7 @@ const HUD = (() => {
     });
     syncToolbar();
   }
-  function syncToolbar() { if (!el.tbar) return; el.tbar.querySelector('[data-t=box]').classList.toggle('on', !!ui.boxMode); el.tbar.querySelector('[data-t=multi]').classList.toggle('on', !!ui.multi); }
+  function syncToolbar() { if (!el.tbar) return; el.tbar.querySelector('[data-t=box]').classList.toggle('on', !!ui.boxMode); el.tbar.querySelector('[data-t=multi]').classList.toggle('on', !!ui.multi); el.tbar.querySelector('[data-t=queue]').classList.toggle('on', !!ui.queue); }
 
   /* per-frame input work: edge pan, arrow keys, hover, ghosts, cover preview */
   let lastSig = '';
@@ -691,8 +718,10 @@ const HUD = (() => {
       else if (m.type === 'face') { const e = G.byId.get(m.ids[0]); if (e) ui.ghost = { kind: 'face', x: e.x, y: e.y, a: Math.atan2(wy - e.y, wx - e.x) }; }
     }
     if (mouse.rdown && Math.hypot(mouse.x - mouse.rdown.x, mouse.y - mouse.rdown.y) > 12) { const [sx, sy] = RENDER.toWorld(mouse.rdown.x, mouse.rdown.y); ui.ghost = { kind: 'face', x: sx, y: sy, a: Math.atan2(wy - sy, wx - sx) }; }
-    const hd = mouse.inCanvas && !m && !t ? dropAt(mouse.x, mouse.y) : null; ui.hoverDrop = hd ? hd.id : null;
+    const pico = mouse.inCanvas && !m && !ui.touch ? pointIconAt(mouse.x, mouse.y) : null;
+    const hd = mouse.inCanvas && !m && !t && !pico ? dropAt(mouse.x, mouse.y) : null; ui.hoverDrop = hd ? hd.id : null;
     if (hd && selEnts().some(s => s.owner === 0 && SIM.canPickUp(s))) ui.ghost = { kind: 'label', x: hd.x, y: hd.y, z: 3, label: hd.kind === 'team' ? (hd.side !== G.players[0].side ? 'Capture ' : 'Recrew ') + D.SQUADS[hd.defId].name.replace(' Team', '') : 'Pick up ' + D.W[hd.weapon].name };
+    else if (pico && selEnts().some(s => s.owner === 0 && s.type !== 'building')) ui.ghost = { kind: 'label', x: pico.x, y: pico.y, z: 12, label: pico.owner === 0 ? 'Hold point' : 'Capture point' };
     else if (!m && !t && mouse.inCanvas && selEnts().some(s => s.owner === 0 && s.type === 'squad')) {
       const hb = houseAtScreen(mouse.x, mouse.y);
       if (hb) { const o = hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = { kind: 'house', h: hb, ok: !o || o.owner === 0, label: !o ? 'Garrison' : o.owner === 0 ? 'Occupied' : 'Enemy inside' }; }
@@ -707,7 +736,7 @@ const HUD = (() => {
       ui.coverPreview = out;
     }
     // cursor
-    canvasEl.style.cursor = m ? 'crosshair' : t && t.owner === 1 ? 'crosshair' : 'default';
+    canvasEl.style.cursor = m ? 'crosshair' : t && t.owner === 1 ? 'crosshair' : pico && ui.selected.size ? 'pointer' : 'default';
   }
 
   /* selection rectangle: a DOM box over the canvas */

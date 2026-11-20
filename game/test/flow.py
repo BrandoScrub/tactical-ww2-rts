@@ -1,4 +1,5 @@
-"""Play the opening through real input: Wehrmacht places the Infanterie Kompanie from the HQ card; US engineers build a Barracks from their build page; both queue infantry."""
+"""Play the opening through real input: each side orders its first base building from the HQ card (bottom-left slot, Z),
+it builds itself; then infantry is queued from it."""
 import sys, asyncio
 from playwright.async_api import async_playwright
 SIDE = sys.argv[1] if len(sys.argv) > 1 else 'de'
@@ -17,16 +18,10 @@ async def main():
            for (let r = 18; r < 40; r += 3) for (let a = 0; a < 24; a++) { const x = hq.x + Math.cos(a / 24 * U.TAU) * r, y = hq.y + Math.sin(a / 24 * U.TAU) * r; if (!SIM.canPlace(G, 0, id, x, y)) return { x, y }; } return null; }""", SIDE)
         await pg.wait_for_timeout(300)
         sp = await pg.evaluate("(p) => RENDER.toScreen(p.x, p.y)", spot)
-        if SIDE == 'de':
-            hq = await pg.evaluate("() => { const h = SIM.hqOf(G, 0); return RENDER.toScreen(h.x, h.y, 1); }")
-            await pg.mouse.click(hq[0], hq[1]); await pg.wait_for_timeout(300)
-            await pg.screenshot(path='/tmp/shots/flow-hq.png')
-            await pg.keyboard.press('z')                      # bottom-left slot: Infanterie Kompanie
-        else:
-            await pg.keyboard.press('1'); await pg.wait_for_timeout(200)   # engineers are group 1
-            await pg.keyboard.press('v'); await pg.wait_for_timeout(200)   # construct page
-            await pg.screenshot(path='/tmp/shots/flow-build.png')
-            await pg.keyboard.press('a')                      # Barracks
+        hq = await pg.evaluate("() => { const h = SIM.hqOf(G, 0); return RENDER.toScreen(h.x, h.y, 1); }")
+        await pg.mouse.click(hq[0], hq[1]); await pg.wait_for_timeout(300)
+        await pg.screenshot(path='/tmp/shots/flow-hq.png')
+        await pg.keyboard.press('z')                          # bottom-left slot: the first base building
         await pg.mouse.move(sp[0], sp[1]); await pg.wait_for_timeout(300)
         await pg.screenshot(path='/tmp/shots/flow-ghost.png')
         await pg.mouse.click(sp[0], sp[1]); await pg.wait_for_timeout(300)

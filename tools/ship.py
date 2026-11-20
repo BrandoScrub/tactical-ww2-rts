@@ -9,6 +9,8 @@ What it runs, in order (it stops at the first failure and says which):
   1. art engine pinned copy untouched      tools/update_artkit.py --verify
   2. every vehicle and crew weapon holds    tools/check.py                      TOTAL 0
      together, every map house has art     game/test/houses.js                 no problems
+     queued orders, capture-point orders,  game/test/orders.js                 orders ok
+     repairs, mortar and MG choices
   3. AI against AI, 8 matches of 18 min     game/test/soak.js 8 18              no problems
   4. the build                              tools/build_web.py dist             (fails if any art file is missing)
   5. the build in a browser, PC and phone   loads with no page errors and all its art, a skirmish starts as each side
@@ -112,6 +114,7 @@ def main(args):
         lambda: run('art engine untouched', [sys.executable, 'tools/update_artkit.py', '--verify']),
         lambda: run('vehicles and crew weapons hold together', [sys.executable, 'tools/check.py'], ok='TOTAL 0'),
         lambda: run('every map house has art', ['node', 'game/test/houses.js'], ok='no problems'),
+        lambda: run('orders, repairs, mortar and MG choices', ['node', 'game/test/orders.js'], ok='orders ok'),
     ]
     if not quick: steps.append(lambda: run('AI against AI, 8 matches', ['node', 'game/test/soak.js', '8', '18'], ok='no problems'))
     steps += [

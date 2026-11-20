@@ -90,7 +90,7 @@ const MAIN = (() => {
       show('game');
       if (spec) { RENDER.cam.x = G.map.w / 2; RENDER.cam.y = G.map.h / 2; HUD.flash('Watching the AI. Speed and fog are under the score; − folds that bar. Space pauses.'); }
       else if (mode === 'sandbox') HUD.flash('Sandbox: 10,000 manpower, munitions and fuel to test with.');
-      else HUD.flash(side === 'us' ? 'US Forces: take the victory points. Engineers build your base.' : 'Wehrmacht: take the victory points. Place buildings from the HQ, Pioneers raise them.');
+      else HUD.flash(side === 'us' ? 'US Forces: take the victory points. Order base buildings from the HQ; they build themselves.' : 'Wehrmacht: take the victory points. Order base buildings from the HQ; they build themselves.');
     }, 30);
   }
   function toMain() {
