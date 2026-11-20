@@ -31,8 +31,8 @@ Unit numbers come from CoH3 game data (coh3stats.com, patch 3.0.1). Units with n
 marked `standIn` with the slot they fill. Player buildings are flat stand-ins until they are modelled, and battlegroups
 are structure only until they are designed.
 
-Before a commit that touches `game/`: `node game/test/soak.js 8 18` prints `no problems`, and `python3 game/test/flow.py de`
-and `python3 game/test/mobile.py` print `no page errors` (both need `python3 -m http.server 8765` running at the root).
+Before any merge: `python3 tools/ship.py` prints `PASS`. It is the one check: every test, the published build, and that
+build played in a browser on PC and phone sizes (no web server needed). Then merge and publish `dist/` (see CLAUDE.md).
 
 ## Layout
 ```
