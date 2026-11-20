@@ -30,6 +30,7 @@ or the published game will not have it.
   README unit table: `tools/list_units.py`). Props (field defences, walls, hedges, trees, rock: `models/defences.py`,
   `models/terrain.py`): `tools/build_props.py` into `art/props/`. Farmhouses (`models/scenery.py`):
   `tools/build_scenery.py` into `art/scenery/`; a new house footprint in `game/src/map.js` needs a variant there and in
-  `HOUSE_ART`. Base buildings (`models/bases.py`, blockout stage): `tools/review_bases.py`.
+  `HOUSE_ART`. Base buildings (`models/bases.py`): `tools/build_bases.py` into `art/bases/` (stages build33, build66, normal,
+  damaged; flag recoloured per player); design review: `tools/review_bases.py`.
 - **Game code lives in `game/`.** Numbers go in `game/src/data.js` with their source (CoH3 game data where a counterpart
   exists, `standIn` where not); `data/units.json` stays the art roster. Keep the PC and phone layouts both working.

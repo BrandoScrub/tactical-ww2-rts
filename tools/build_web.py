@@ -31,8 +31,8 @@ def main(out):
     os.makedirs(os.path.join(out, 'lib'))
     os.makedirs(os.path.join(out, 'art', 'pack'))
     # every art folder the game loads besides the unit pages: ground tiles, game-drawn materials, map buildings
-    # (scenery: the farmhouses) and field-defence / terrain props. A folder missing here is art missing in the build.
-    for d in ('ground', 'materials', 'scenery', 'props'):
+    # (scenery: the farmhouses), field-defence / terrain props and base buildings (bases). A folder missing here is art missing in the build.
+    for d in ('ground', 'materials', 'scenery', 'props', 'bases'):
         if os.path.isdir(os.path.join(ROOT, 'art', d)):
             shutil.copytree(os.path.join(ROOT, 'art', d), os.path.join(out, 'art', d))
     html = open(os.path.join(ROOT, 'game', 'index.html')).read()
@@ -51,11 +51,11 @@ def main(out):
             pages.add(p)
     for p in sorted(pages):
         shutil.copy(os.path.join(ROOT, 'art', p), os.path.join(out, 'art', p))
-    for f in ('assets.json', 'crew_layout.json', 'scenery.json', 'props.json'):
+    for f in ('assets.json', 'crew_layout.json', 'scenery.json', 'props.json', 'bases.json'):
         if os.path.exists(os.path.join(ROOT, 'art', f)):
             shutil.copy(os.path.join(ROOT, 'art', f), os.path.join(out, 'art', f))
     # every art file the game's code names must be in the build
-    missing = [f for f in ('scenery.json', 'props.json') if os.path.exists(os.path.join(ROOT, 'art', f))
+    missing = [f for f in ('scenery.json', 'props.json', 'bases.json') if os.path.exists(os.path.join(ROOT, 'art', f))
                for src in [json.load(open(os.path.join(out, 'art', f)))] for v in src.values()
                for p in _files(v) if not os.path.exists(os.path.join(out, 'art', p))]
     if missing: sys.exit(f'build is missing art: {missing[:5]}')
