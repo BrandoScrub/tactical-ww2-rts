@@ -191,19 +191,88 @@ def mortar(german=False):
     return m
 
 # ------------------------------------------------------------------ troopers
+from artkit.figure import material
+material('marking', (226, 222, 206), 'plain')              # white paint on a helmet
+
+def _line(pts, r, mat, seg=5):
+    m = None
+    for a, b in zip(pts, pts[1:]):
+        s = cyl(a, b, r, mat, seg=seg); m = s if m is None else m + s
+    return m
+
+def webbing(mat):
+    """Load-carrying straps over both shoulders, crossing to a Y at the back: pale canvas on the American, black
+    leather on the German. At 40 px it is two lines down the chest: the difference between a man and a uniform."""
+    m = None
+    for sy in (1, -1):
+        s = _line([(7.2, sy * 4.0, 3), (7.7, sy * 4.5, 20), (3.6, sy * 5.4, 26.5), (-3.6, sy * 5.4, 26.5), (-7.8, sy * 4.4, 20), (-7.3, sy * 1.2, 4)], 1.05, mat)
+        m = s if m is None else m + s
+    return m
+
+def cartridge_belt():
+    """American M1923 belt: a broad canvas band of pockets round the waist (the German wears a narrow leather belt)."""
+    return lathe([(9.25, 2.8), (9.25, 7.2)], 'canvas').scaled(.84, 1.08, 1)
+
+def bandolier():
+    """Cloth bandolier of rifle clips slung across the chest: the rifleman's mark."""
+    return _line([(6.6, -6.4, 5), (7.9, 0, 15), (5.6, 6.6, 24), (-5.6, 6.6, 24), (-8.0, 0, 15), (-6.6, -6.4, 5)], 1.7, 'canvas', seg=6)
+
+def belt_of_rounds():
+    """A belt of cartridges draped round the neck: the machine gunner's mark, a brass line on field grey."""
+    return _line([(7.4, -4.6, 8), (7.6, -5.0, 19), (3.0, -5.6, 26.6), (-4.4, 0, 27.2), (3.0, 5.6, 26.6), (7.6, 5.0, 19), (7.4, 4.6, 10)], 1.35, 'brass', seg=6)
+
+def magazine_belt():
+    """Automatic-rifle belt: six tall magazine pockets round the waist."""
+    m = None
+    for a in (-70, -42, -14, 14, 42, 70, 110, 250):
+        p = box(7.6, 9.6, -1.9, 1.9, .5, 8.5, 'canvas').rz(a).scaled(.86, 1.10, 1); m = p if m is None else m + p
+    return m
+
+def helmet_stripe():
+    """White bar on the back of the helmet (and a smaller one on the front): the mark men follow in the dark; here
+    it is what tells the squad leader from his riflemen."""
+    return box(-8.6, -7.0, -3.4, 3.4, 11.4, 13.6, 'marking').move(.3, 0, 0) + box(7.3, 8.6, -1.0, 1.0, 11.6, 14.6, 'marking').move(.3, 0, 0)
+
+def field_cap():
+    """German M43 field cap: a soft peaked cap instead of the helmet. The leader's silhouette."""
+    m = lathe([(6.3, 10.6), (6.5, 15.0), (5.9, 16.6), (0, 17.0)], 'tunic', 10)
+    m += box(5.0, 10.2, -4.2, 4.2, 10.6, 11.6, 'tunic')                      # the peak
+    m += sphere(1.0, 'brass', 6, 4).move(6.4, 0, 14.0)
+    return m.move(.3, 0, .6)
+
+def shelter_roll():
+    """Camouflage shelter quarter rolled on the back of the belt: a brown-green bar on the German's back."""
+    return cyl((-9.2, -7.5, 8.5), (-9.2, 7.5, 8.5), 2.7, 'de_smock', seg=8)
+
 def trooper(side, weapon, kit=()):
-    """side 'us' or 'de'. kit: any of 'pack', 'flame', 'shovel', 'satchel', 'baseplate', 'cape' (scrim cape), 'scrim' (netted helmet)."""
+    """side 'us' or 'de'. kit: any of 'pack', 'flame', 'shovel', 'satchel', 'baseplate', 'cape' (scrim cape), 'scrim'
+    (netted helmet), and the role marks: 'leader' (American: white helmet bar, field-glass case; German: field cap,
+    field-glass case), 'bandolier' (rifleman), 'belt' (machine gunner: belt of rounds / magazine belt), 'cover'
+    (camouflage helmet cover)."""
     us = side == 'us'
-    chest = []; pelvis = [(S.ammo_pouches(), 'ammunition pouches')]
+    chest = [(webbing('canvas' if us else 'leather'), 'webbing')]
+    pelvis = [(S.ammo_pouches().mat_as('canvas') if us else S.ammo_pouches(), 'ammunition pouches')]
+    if us: pelvis.append((cartridge_belt(), 'cartridge belt'))
     if 'pack' in kit: chest.append((S.pack(), 'pack'))
+    elif not us and not any(k in kit for k in ('flame', 'baseplate', 'cape')): chest.append((shelter_roll(), 'shelter quarter'))
     if 'flame' in kit: chest += [(S.fuel_tanks(), 'flamethrower tanks'), (S.fuel_hose(), 'fuel hose')]
     if 'shovel' in kit: chest.append((S.shovel_on_shoulder(), 'shovel'))
     if 'satchel' in kit: chest.append((satchel(), 'satchel charge'))
     if 'baseplate' in kit: chest.append((baseplate_on_back(not us), 'mortar baseplate'))
     if 'cape' in kit: chest.append((S.camo_cape(), 'scrim cape'))
+    if 'bandolier' in kit: chest.append((bandolier(), 'bandolier'))
+    if 'belt' in kit:
+        if us: pelvis.append((magazine_belt(), 'magazine belt'))
+        else: chest.append((belt_of_rounds(), 'belt of rounds'))
+    if 'leader' in kit: pelvis.append((S.field_glasses(), 'field-glass case'))
     pelvis.append((canteen(), 'canteen') if us else (S.canister(), 'gas mask tin'))
     if not us: pelvis.append((bread_bag(), 'bread bag'))
-    u = build_trooper(f'{side} trooper', weapon, (S.scrim_helmet(), 'netted helmet') if 'scrim' in kit else (m1_helmet(), 'M1 helmet') if us else (stahlhelm(), 'steel helmet'), chest=chest, pelvis=pelvis)
+    if 'scrim' in kit: hat = (S.scrim_helmet(), 'netted helmet')
+    elif us: hat = ((m1_helmet() + helmet_stripe(), 'M1 helmet with a leader\'s bar') if 'leader' in kit else (m1_helmet(), 'M1 helmet'))
+    elif 'leader' in kit: hat = (field_cap(), 'field cap')
+    elif 'cover' in kit: hat = (stahlhelm().mat_as('de_smock'), 'steel helmet in a camouflage cover')
+    else: hat = (stahlhelm(), 'steel helmet')
+    u = build_trooper(f'{side} trooper', weapon, hat, chest=chest, pelvis=pelvis)
     if not us:                                       # tall boots instead of leggings
         u.parts = [(b, (g.mat_as('boot') if b.startswith('shin') else g), n, w) for b, g, n, w in u.parts]
     return u

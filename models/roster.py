@@ -4,7 +4,7 @@ import math
 import numpy as np
 from artkit.figure import material, Clip, keyframes
 from artkit.parts.trooper import trooper_clips, sighted
-from . import us_vehicles, de_vehicles, us_vehicles2, de_vehicles2, infantry as I
+from . import us_vehicles, de_vehicles, us_vehicles2, de_vehicles2, finish, infantry as I
 
 material('us_jump', (164, 150, 108), 'canvas'); material('de_smock', (118, 104, 70), 'canvas')      # airborne jump suit; camouflage smock
 
@@ -44,9 +44,10 @@ def vehicles(side):
     V2 = us_vehicles2 if side == 'us' else de_vehicles2
     for role, name, fn in V.ALL + V2.ALL:
         key = f"{side}_{role.replace(' ', '_').replace('-', '_')}"
-        out.append((key, role, name, paint(fn(), side)))
+        out.append((key, role, name, paint(finish.apply(fn(), key), side, camo=key in finish.CAMO)))
     gun = V.at57 if side == 'us' else V.pak40
-    out.append((f'{side}_anti_tank_gun_limbered', 'crew weapon', 'anti-tank gun, trails closed for moving', paint(gun(deployed=False), side)))
+    k = f'{side}_anti_tank_gun_limbered'
+    out.append((k, 'crew weapon', 'anti-tank gun, trails closed for moving', paint(finish.apply(gun(deployed=False), k), side, camo=k in finish.CAMO)))
     for name, fn in (('tripod_mg', I.tripod_mg), ('mortar', I.mortar)):
         mm = fn(side == 'de'); out.append((f'{side}_{name}', 'crew weapon', mm.name, paint(mm, side)))
     return out
@@ -78,10 +79,10 @@ def men(side):
     rifle, smg = (I.garand, I.thompson) if us else (I.kar98, I.mp40)
     out = []
     def add(key, name, u, clips): out.append((f'{side}_{key}', name, dress(u, side), clips))
-    u = I.trooper(side, rifle(), ['pack']); add('rifleman', 'rifleman', u, trooper_clips(u, fire='auto' if us else 'bolt')[0])
-    u = I.trooper(side, smg()); add('leader', 'leader, submachine gun', u, trooper_clips(u, fire='auto')[0])
+    u = I.trooper(side, rifle(), ['pack', 'bandolier'] if us else ['pack']); add('rifleman', 'rifleman', u, trooper_clips(u, fire='auto' if us else 'bolt')[0])
+    u = I.trooper(side, smg(), ['leader']); add('leader', 'leader, submachine gun', u, trooper_clips(u, fire='auto')[0])
     u = I.trooper(side, I.S.flame_gun(), ['flame']); add('flamethrower', 'engineer, flamethrower', u, trooper_clips(u, fire='auto', weight=1.6)[0])
-    u = I.trooper(side, rifle(), ['shovel']); add('sapper', 'engineer, shovel', u, trooper_clips(u, fire='auto' if us else 'bolt')[0])
+    u = I.trooper(side, rifle(), ['shovel', 'satchel']); add('sapper', 'engineer, shovel', u, trooper_clips(u, fire='auto' if us else 'bolt')[0])
     # rocket gunner: the trooper's footwork, his own shouldered aim and shot
     u = I.trooper(side, I.bazooka() if us else I.panzerschreck())
     base, st, _ = trooper_clips(u, fire='auto')
@@ -136,7 +137,7 @@ def crews(side):
     ram = {k: p1[k] for k in ('hand_R', 'chest_rot')}
     add('at_loader', 'anti-tank loader', u, [_still('idle', p0), Clip('fire', keyframes(p0, [(0.0, {}), (0.35, {}), (0.6, ram), (0.75, ram), (1.0, {})]), frames=8, fps=10, loop=False)])
     # commander: kneels behind and to the left, submachine gun up, watching the target
-    u = I.trooper(side, smg()); add('at_commander', 'anti-tank gun commander', u, [_still('idle', sighted(u, I.KNEEL))])
+    u = I.trooper(side, smg(), ['leader']); add('at_commander', 'anti-tank gun commander', u, [_still('idle', sighted(u, I.KNEEL))])
     # pusher: walks bent forward with both hands out on the trail (rifle slung)
     u = I.trooper(side, rifle()); _, st, ex = trooper_clips(u, fire='auto')
     def push(fn):
@@ -164,9 +165,9 @@ def more_men(side):
         if over: u.parts = [(b, _rename(g, over), n, w) for b, g, n, w in u.parts]
         out.append((f'{side}_{key}', name, u, clips))
     u = I.trooper(side, I.S.scoped_rifle(), ['scrim'] if us else ['cape']); add('sniper', 'sniper, scoped rifle', u, trooper_clips(u, fire='bolt')[0])
-    u = I.trooper(side, I.bar() if us else I.mg42_light(), ['pack']); add('lmg', 'automatic rifleman' if us else 'light machine gunner', u, trooper_clips(u, fire='auto', weight=1.4)[0])
+    u = I.trooper(side, I.bar() if us else I.mg42_light(), ['belt']); add('lmg', 'automatic rifleman' if us else 'light machine gunner', u, trooper_clips(u, fire='auto', weight=1.4)[0])
     if us: u = I.trooper(side, I.m1_carbine(), ['scrim', 'pack']); add('assault_trooper', 'airborne trooper, carbine', u, trooper_clips(u, fire='auto')[0], {'us_tunic': 'us_jump', 'us_trousers': 'us_jump'})
-    else: u = I.trooper(side, I.stg44()); add('assault_trooper', 'panzergrenadier, assault rifle', u, trooper_clips(u, fire='auto')[0], {'de_tunic': 'de_smock'})
+    else: u = I.trooper(side, I.stg44(), ['cover']); add('assault_trooper', 'panzergrenadier, assault rifle', u, trooper_clips(u, fire='auto')[0], {'de_tunic': 'de_smock'})
     return out
 
 

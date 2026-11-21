@@ -158,3 +158,83 @@ def howitzer(name, wr, wy, ww, blen, br, elev, shield_h, trail, brake=None, recu
         y0, y1 = sorted((sd * 0.76, sd * 1.04))
         m.add(f'spade_{s}', slab(-trail - 0.14, -trail + 0.05, y0, y1, 0.0, 0.26, 'steel'), 'spade: digs in against the recoil', on=f'trail_{s}')
     return m
+
+
+# ---------------------------------------------------------------- finishing kit (tertiary detail: models/finish.py)
+# Everything here is still a Machine part with a reason and a mount. Sizes from DESIGN_METHOD.md step 4; anything
+# thinner than 3 px is only kept where it is a line that carries (a tool handle, an aerial) and says so (small_ok).
+import numpy as np
+
+
+def _basis(n, up):
+    n = np.asarray(n, float); n = n / np.linalg.norm(n); v = np.asarray(up, float); v = v - n * (v @ n)
+    if np.linalg.norm(v) < 1e-6: v = np.array([1.0, 0, 0]); v = v - n * (v @ n)        # on a roof: the picture's top points forward
+    v = v / np.linalg.norm(v)
+    return np.cross(v, n), v, n
+
+
+def mark(m, name, decal, c, n, w, h, on, why, up=UP, spin=0.0):
+    """A painted marking or a pane (a decal stretched over one flat quad): centre c on the surface (metres), facing
+    n, w x h metres, its top towards `up` (on a roof: forward), turned `spin` degrees in its own plane."""
+    u, v, n = _basis(n, up)
+    if spin: a = math.radians(spin); u, v = u * math.cos(a) + v * math.sin(a), v * math.cos(a) - u * math.sin(a)
+    c = np.array(P(*c), float) + n * 0.7
+    W, H = w * M, h * M; p0 = c - u * (W / 2) - v * (H / 2)
+    # the picture's left edge is on the viewer's left (sh.quad would mirror it: fine for a window, not for a number)
+    g = sh.Build().poly([p0, p0 + u * W, p0 + u * W + v * H, p0 + v * H], [(W, H), (0, H), (0, 0), (W, 0)], decal, bias=2, wear=False).geometry()
+    m.add(name, g, why, on=on, convex=False)
+
+
+def on_plane(a, b, c, s, t):
+    """The point a + s (b - a) + t (c - a) and the plane's normal (pointing as a->b x a->c): for putting a marking
+    on a sloped plate from three of its corners."""
+    a, b, c = (np.asarray(p, float) for p in (a, b, c)); n = np.cross(b - a, c - a)
+    return tuple(a + s * (b - a) + t * (c - a)), tuple(n / np.linalg.norm(n))
+
+
+def roll(m, name, p0, p1, r, on, mat='canvas', why='bedroll or tarpaulin lashed on: the crew lives on the vehicle; a pale band that breaks up the plate', **k):
+    m.add(name, rod(p0, p1, r, mat, seg=8), why, on=on, **k)
+
+
+def crate(m, name, x0, x1, y0, y1, z0, z1, on, mat='wood', why='crate lashed down: rations and ammunition ride outside', **k):
+    m.add(name, slab(x0, x1, y0, y1, z0, z1, mat), why, on=on, **k)
+
+
+def can(m, name, x, y, z, on, across_=True, why='jerry can in its rack: fuel or water for the next day', mat='steel', **k):
+    """A 20-litre can (0.34 x 0.16 x 0.46 m), its long side across (or along) the vehicle; x, y: centre, z: its base."""
+    a, b = (0.08, 0.17) if across_ else (0.17, 0.08)
+    m.add(name, slab(x - a, x + a, y - b, y + b, z, z + 0.46, mat), why, on=on, **k)
+
+
+def tool(m, name, p0, p1, on, head=None, wall=False, why='pioneer tool clipped to the plate: crews dig their vehicle in and out', **k):
+    """A wooden handle from p0 to p1 (along the vehicle); head: 'shovel' or 'axe' puts a steel blade at p1, lying flat
+    on a roof, or flat against a side plate with wall=True."""
+    m.add(name, rod(p0, p1, 0.024, 'wood', seg=6), why + ' (a line that carries)', on=on, small_ok=True, **k)
+    if head:
+        x, y, z = p1; s_ = 0.11 if head == 'shovel' else 0.08; L = 0.24 if head == 'shovel' else 0.12
+        dy, dz = (0.02, s_) if wall else (s_, 0.02)
+        m.add(name + '_head', slab(x - 0.02, x + L, y - dy, y + dy, z - dz, z + dz, 'steel'), f'the {head} blade', on=name, small_ok=True)
+
+
+def links(m, name, x0, x1, y0, y1, z0, z1, on, why='spare track links hung on the plate: repairs, and a little more armour; a dark toothed band', **k):
+    m.add(name, slab(x0, x1, y0, y1, z0, z1, 'steel'), why, on=on, **k)
+
+
+def aerial(m, name, x, y, z, h, on, lean=0.0, why='radio aerial: a whip on a sprung base (a line that carries)'):
+    m.add(name + '_base', disc(x, y, z, z + 0.12, 0.04), 'sprung aerial base', on=on, small_ok=True)
+    h *= 0.72; lean *= 0.72
+    m.add(name, rod((x, y, z + 0.12), (x - lean, y, z + 0.12 + h), 0.005, 'steel', seg=4), why, on=name + '_base', small_ok=True)
+
+
+def lamp(m, name, x, y, z, on, r=0.09, why='headlamp: marks the front'):
+    m.add(name, rod((x, y, z), (x + 0.14, y, z), r, 'steel', seg=10), why, on=on, small_ok=True)
+    mark(m, name + '_lens', 'lens', (x + 0.14, y, z), (1, 0, 0), 2 * r, 2 * r, name, 'the glass of the lamp')
+
+
+def crew(m, name, side, x, y, top, on, through=(), why='crewman head and shoulders out of the hatch: the scale cue, and it says the top is open', hands=None, show=0.52):
+    """A standing crewman with `show` metres of him above `top` (the roof or the rim he stands in). through: the
+    parts his body passes down into besides his mount."""
+    from .infantry import crewman, STAND
+    at = (x * M, y * M, (top + show) * M - 100.0)
+    L, R = hands if hands else (None, None)
+    m.add(name, crewman(side, STAND, at, L=L, R=R), why, on=on, contact=[t for t in through if t in m.parts], convex=False, small_ok=True)
