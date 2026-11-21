@@ -4,6 +4,7 @@
  "tiles": "tiles",
  "tile_units": 128,
  "tile_px": 128,
+ "tile_scale": {"de_camo": 3.5},
  "procedural": {
   "us_hull": [[98, 104, 64], "metal"],
   "us_canvas": [[136, 128, 86], "canvas"],

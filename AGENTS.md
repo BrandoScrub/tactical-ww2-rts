@@ -29,6 +29,11 @@ or the published game will not have it.
   moves, is powered, built and serviced), references, mechanism before shell, scale from the table, big shapes first at
   play size, a grey blockout shown to the user before detail. Every part carries a one-line `why`. Vehicles and crew
   weapons are `artkit.machine.Machine`s.
+- **Units are finished in a second pass.** The agreed blockouts stay as they are (`models/*_vehicles*.py`); markings,
+  stowage, lamps, skirts and crew are added per vehicle in `models/finish.py` (helpers in `models/kit.py`), and the men's
+  webbing and role marks in `models/infantry.py`. Markings and the German camouflage tile are drawn by
+  `tools/make_markings.py` (into `styles/ww2/decals/` and `styles/ww2/tiles/de_camo.jpg`). Look before exporting:
+  `python3 tools/review_units.py <out> [key ...]` (vehicles) and `... <out> men` (infantry), close and at play size.
 - **`data/units.json` and `models/` must agree.** A new unit gets a model, a line in `models/roster.py` and a data entry;
   `tools/build_art.py` refuses otherwise. A unit's heading count comes from its data entry.
 - **Art is committed.** Unit art: `tools/build_art.py` into `art/` (previews: `tools/preview_units.py art docs/previews`;
