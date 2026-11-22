@@ -407,6 +407,10 @@ const SIM = (() => {
     if (D.BUILDINGS[o.what]) { event(G, sq.owner, 'error', 'Base buildings are ordered from the HQ', o.x, o.y); return null; }
     else if (D.DEFENCES[o.what] && D.DEFENCES[o.what].point) {
       const def = D.DEFENCES[o.what];
+      // an unfinished one of ours here (its diggers retreated or died): pick the work up again, nothing more to pay.
+      // Without this a half-dug position could never be finished: it stayed a faded ring that blocked the ground.
+      const old = unfinishedPit(G, sq.owner, o.x, o.y, o.what);
+      if (old) return [{ kind: 'pit', id: old.id }];
       const why = canPit(G, sq.owner, o.what, o.x, o.y); if (why) { event(G, sq.owner, 'error', why, o.x, o.y); return null; }
       if (!canAfford(P, def.cost)) { event(G, sq.owner, 'error', 'Not enough resources', o.x, o.y); return null; }
       pay(P, def.cost);
@@ -431,6 +435,9 @@ const SIM = (() => {
     return null;
   }
   /* where a fighting position can go: the faction's own kind, on open ground, clear of houses and other positions */
+  function unfinishedPit(G, owner, x, y, id) {
+    return G.map.houses.find(h => h.pit && !h.dead && h.built < 1 && h.owner === owner && (!id || h.defId === id) && Math.hypot(h.x - x, h.y - y) < h.w) || null;
+  }
   function canPit(G, owner, id, x, y) {
     const def = D.DEFENCES[id]; if (!def || !def.point) return 'Unknown';
     if (def.side !== G.players[owner].side) return 'Not this army';
@@ -1236,7 +1243,7 @@ const SIM = (() => {
     popRecount(G);
   }
 
-  return { DT, busy, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, canPit, prodBlock, canAfford, pay, unitDef, hqOf,
+  return { DT, busy, abandonVehicle, standPlan, threatDir, damageHouse, houseOf, GARRISON, DROPS, onModelDeath, canPickUp, create, step, issue, unfinishedPit, spawnSquad, spawnVehicle, placeBuilding, canPlace, sealsBase, buildReqMissing, canPit, prodBlock, canAfford, pay, unitDef, hqOf,
     vetBonus, addXp, event, kill, crewSlot, crewReady, weaponOf, isPinned, updateTerritory, connected, nearReinforcePoint, popRecount, setPath, enemyOf, setup, teardown };
 })();
 if (typeof module !== 'undefined') module.exports = SIM;
