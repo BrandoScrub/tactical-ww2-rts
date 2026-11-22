@@ -224,11 +224,32 @@ def k_ship(m):
     return m
 
 
+def spin(m):
+    """Engines running: every propeller's blades become a blurred disc (decal prop_disc_<blades>, drawn on both
+    faces; the haze is fine streaks, see tools/make_markings.py prop_disc for why). The blockouts keep their blades; aircraft.finished(key, spinning=False) keeps them too."""
+    for name in [n for n in m.parts if n.endswith('_spinner')]:
+        pre = name[:-8]; hub = np.asarray(m.parts[name].turns[0], float)
+        blades = [n for n in m.parts if n.startswith(pre + '_blade')]
+        if not blades: continue
+        r = max(float(np.linalg.norm(m.parts[b].geom.P.reshape(-1, 3)[:, 1:] - hub[1:], axis=1).max()) for b in blades) / M
+        x = float(np.mean([m.parts[b].geom.P[..., 0].mean() for b in blades])) / M
+        for b in blades: del m.parts[b]
+        for sx, tag in ((1, 'front'), (-1, 'back')):
+            n = f'{pre}_disc_{tag}'
+            mark(m, n, f'prop_disc_{len(blades)}', (x, hub[1] / M, hub[2] / M), (sx, 0, 0), 2 * r, 2 * r, name,
+                 'the turning propeller: a blurred disc with a yellow tip ring, as a running engine looks')
+            g = m.parts[n].geom; one = np.ones(len(g), np.int8)
+            m.parts[n].geom = g._new(thin=one, low=one)              # a haze, not an object: it draws no outline
+            if 'envelope' in m.parts: m.parts[n].contact = ('envelope',)    # the square the disc is drawn on has empty corners; under the airship they reach into the envelope's outline, the disc itself does not
+    return m
+
+
 FINISH = {'p47': p47, 'bf109': bf109, 'ju87': ju87, 'b25': b25, 'c47': c47, 'ju52': ju52, 'k_ship': k_ship}
 
 
-def apply(m, key):
-    return FINISH[key](m)
+def apply(m, key, spinning=True):
+    m = FINISH[key](m)
+    return spin(m) if spinning else m
 
 
 # ---------------------------------------------------------------- paint

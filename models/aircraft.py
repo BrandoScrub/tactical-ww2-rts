@@ -479,7 +479,8 @@ ALL = [('fighter', 'P-47D Thunderbolt', p47), ('fighter', 'Bf 109 G-6', bf109), 
        ('transport', 'C-47 Skytrain', c47), ('transport', 'Ju 52/3m', ju52), ('airship', 'K-class blimp', k_ship)]
 
 
-def finished(key):
-    """The blockout with its finishing pass and paint (models/air_finish.py): what the game would export."""
+def finished(key, spinning=True):
+    """The blockout with its finishing pass and paint (models/air_finish.py): what the game would export.
+    spinning: propellers as blurred discs (engines running); False keeps the blades."""
     from . import air_finish
-    return air_finish.paint(air_finish.apply(BLOCKOUT[key](), key), key)
+    return air_finish.paint(air_finish.apply(BLOCKOUT[key](), key, spinning), key)

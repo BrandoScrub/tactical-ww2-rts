@@ -152,11 +152,29 @@ def corrugated(a, ridges=16):
     return np.clip(a * (1 + 0.16 * v)[:, None, None], 0, 255)
 
 
+def prop_disc(n=320, blades=3, seed=5):
+    """A turning propeller as the eye sees it: a faint grey disc, denser where the blades are smeared, a yellow ring at
+    the tips (blade-tip warning paint), clear in the middle where the spinner shows through.
+    WORKAROUND (logged in the project notes): artkit has no partial transparency, a texel is solid or a hole. So the
+    blur is drawn as fine radial streaks, solid or absent, which the renderer's own smoothing averages into a haze.
+    A real translucent material belongs in the engine repository, as an option."""
+    r_ = np.random.default_rng(seed + blades)
+    y, x = np.mgrid[0:n, 0:n]; c = (n - 1) / 2; r = np.hypot(x - c, y - c) / c; a = np.arctan2(y - c, x - c)
+    bins = 240; k = ((a + math.pi) / (2 * math.pi) * bins).astype(int) % bins
+    dens = 0.20 + 0.16 * (0.5 + 0.5 * np.cos(a * blades * 2))                       # share of streaks drawn at this angle
+    streak = r_.random(bins)[k] + (r_.random((n, n)) - 0.5) * 0.25 < dens            # mostly whole streaks, a little grain
+    on = streak & (r > 0.16) & (r < 0.93)
+    tip = (np.abs(r - 0.955) < 0.022) & (r_.random(bins)[k] < 0.7)
+    rgb = np.empty((n, n, 3)); rgb[:] = (84, 86, 80); rgb[tip] = (204, 170, 62)
+    return Image.fromarray(np.dstack([rgb, (on | tip) * 255]).astype(np.uint8), 'RGBA')
+
+
 def air():
     """Only the aircraft and parachute markings and paints: python3 tools/make_markings.py air"""
     os.makedirs(DEC, exist_ok=True)
     out = {'us_air_star': star_and_bar(), 'cabin_windows_7': windows(7), 'cabin_windows_5': windows(5),
            'us_navy': text('U.S. NAVY', BLACK, h=64), 'k_number': text('K-109', BLACK, h=64), 'us_tail_serial': text('276541', (204, 170, 62), h=32)}
+    out['prop_disc_3'] = prop_disc(blades=3); out['prop_disc_4'] = prop_disc(blades=4)
     for k, im in out.items(): im.save(os.path.join(DEC, k + '.png'))
     sand = mottle(cells=(4, 9))
     for name, arr in (('de_air', sand), ('de_air_corr', corrugated(mottle(cover=(2.0, 3.0)))),              # plain sand: blotches do not survive a 2.3 m tile
