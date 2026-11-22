@@ -533,15 +533,14 @@ const AI = (() => {
           }
         }
       }
-      // holding a fighting position: stay in it while the point it guards is ours or contested, and for a while after
-      // getting in. Without this the goal picker sent the squad off to another point and the manning rule put the next
+      // holding a fighting position: stay in it while enemies are near (a machine gun also while the point it guards
+      // is ours). Without this the goal picker sent the squad off to another point and the manning rule put the next
       // squad in, over and over (46 changes of occupant in one position in a 15-minute match).
       if (e.type === 'squad' && e.garrison != null && G.map.houses[e.garrison] && G.map.houses[e.garrison].pit) {
         const h = G.map.houses[e.garrison];
-        if (e.pitId !== h.id) { e.pitId = h.id; e.pitT = G.t; }
         const guarded = pts.some(p => p.owner !== enemy && U.dist2(p.x, p.y, h.x, h.y) < 26 * 26);
-        // a machine gun keeps the position; riflemen only for a while and while there is someone to shoot at
-        if (guarded && e.crew || G.t - e.pitT < 60 || visibleEnemies.some(o => U.dist2(o.x, o.y, h.x, h.y) < 45 * 45)) continue;
+        // a machine gun keeps the position by a point we hold; anyone else stays only while there is an enemy near
+        if (guarded && e.crew || visibleEnemies.some(o => U.dist2(o.x, o.y, h.x, h.y) < 45 * 45)) continue;
       }
       // busy moving or fighting: let it be, but re-target now and then
       const busy = (e.path && e.path.length) || e.order.type === 'attack' || (e.crew && e.crew.state !== 'packed' && G.t - e.lastFire < 8) || (G.t - e.lastFire < 3);
