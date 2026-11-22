@@ -12,6 +12,8 @@ What it runs, in order (it stops at the first failure and says which):
      queued orders, capture-point orders,  game/test/orders.js                 orders ok
      repairs, mortar and MG choices
      unit classes and squad-owned weapons  game/test/classes.js                no problems
+     MG suppression, mortars, defences     game/test/teamweapons.js 2 12       no problems
+     breaking apart, blasts
   3. AI against AI, 8 matches of 18 min     game/test/soak.js 8 18              no problems
   4. the build                              tools/build_web.py dist             (fails if any art file is missing)
   5. the build in a browser, PC and phone   loads with no page errors and all its art, a skirmish starts as each side
@@ -117,6 +119,7 @@ def main(args):
         lambda: run('every map house has art', ['node', 'game/test/houses.js'], ok='no problems'),
         lambda: run('orders, repairs, mortar and MG choices', ['node', 'game/test/orders.js'], ok='orders ok'),
         lambda: run('unit classes and squad weapons', ['node', 'game/test/classes.js'], ok='no problems'),
+        lambda: run('MGs, mortars, breakable defences, blasts', ['node', 'game/test/teamweapons.js', '2', '12'], ok='no problems'),
     ]
     if not quick: steps.append(lambda: run('AI against AI, 8 matches', ['node', 'game/test/soak.js', '8', '18'], ok='no problems'))
     steps += [

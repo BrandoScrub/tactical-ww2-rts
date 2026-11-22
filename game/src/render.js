@@ -6,7 +6,7 @@ const RENDER = (() => {
   const ZOOM_MIN = .3;                     // how far out the camera goes (was .55)
   const PXM = 22, VZ = 24;                 // ground px per metre along an axis, screen px per metre of height
   const TEAM = ['#4aa3ff', '#ff5a4a'], TEAM_D = ['#1c4f86', '#86241c'];
-  const R = { opt: { shadows: true, corpses: true }, cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
+  const R = { opt: { shadows: true, corpses: true, shake: true }, cam: { x: 40, y: 160, k: 1 }, W: 1, H: 1, ctx: null, lib: {}, ground: null, fogC: null, mem: new Map(), sprites: {}, hover: null };
 
   /* ---------------- camera ---------------- */
   /* world (x, y, z above the ground) -> screen, and back. The ground is drawn flat: height is painted into the ground
@@ -463,7 +463,22 @@ const RENDER = (() => {
     }
     return (R.craterSpr = out);
   }
+  /* Camera shake from blasts near the middle of the view: a quick decaying jolt, stronger for bigger blasts and fading
+     out with distance from the camera (none past ~60 m). */
+  function shakeOffset(G) {
+    const a = G.shakeAt; if (!R.opt.shake || !a || !G.shake) return null;
+    const age = G.t - a.t; if (age < 0 || age > .6) return null;
+    const d = Math.hypot(a.x - R.cam.x, a.y - R.cam.y), near = U.clamp(1 - (d - 15) / 45, 0, 1);
+    if (!near || !FOG.shownNow(G, a.x, a.y)) return null;
+    const amp = G.shake * near * Math.exp(-age * 7) * .55, w = age * 70;
+    return { x: Math.sin(w * 1.3) * amp, y: Math.cos(w * 1.7) * amp };
+  }
   function frame(G, ui, alpha) {
+    const sh = shakeOffset(G);
+    if (sh) { R.cam.x += sh.x; R.cam.y += sh.y; }
+    try { frameInner(G, ui, alpha); } finally { if (sh) { R.cam.x -= sh.x; R.cam.y -= sh.y; } }
+  }
+  function frameInner(G, ui, alpha) {
     R.G = G;
     const c = R.ctx, k = R.cam.k;
     FOG.view.all = !!ui.noFog; FOG.view.slot = ui.fogSide || 0;
@@ -489,6 +504,8 @@ const RENDER = (() => {
     }
     c.strokeStyle = 'rgba(30,24,16,.4)'; c.lineWidth = 1.5 * k;
     for (const cr of G.map.craters) { if (!vis(cr.x, cr.y, 80)) continue; const [sx, sy] = toScreen(cr.x, cr.y); c.beginPath(); c.ellipse(sx, sy - 1, cr.r * 27 * k, cr.r * 13 * k, 0, 0, U.TAU); c.stroke(); }
+    drawScorch(G, c, k, vis);
+    drawDebris(G, c, k, vis);
     drawSectorLines(G, c, k);
     drawPoints(G, c, k);
     drawSquadStates(G, c, k);
@@ -825,7 +842,7 @@ const RENDER = (() => {
       }
       return true;
     }
-    const P = R.props[key], n = Math.max(1, Math.round(L / P.len));
+    const P = R.props[key], perPiece = cv.php && MAP.PIECE_M[cv.kind] === P.len, n = perPiece ? cv.php.length : Math.max(1, Math.round(L / P.len));
     const fi = ((Math.round((ang * 180 / Math.PI) / P.span * P.headings) % P.headings) + P.headings) % P.headings;
     // the pieces are cut for a line running along the frame's +x from 'first' to 'last'; when the frame shown points
     // the other way along this line (the same picture turned 180 degrees), the ends swap
@@ -835,9 +852,58 @@ const RENDER = (() => {
       const end = n === 1 ? 'solo' : i === 0 ? 'first' : i === n - 1 ? 'last' : null;
       const e2 = end === 'first' && flip ? 'last' : end === 'last' && flip ? 'first' : end;
       const kk = cv.kind === 'hedge' && (i + cv.id) % 2 ? 'hedge_b' : key;
-      list.push({ d: x + y, f: () => { const [sx, sy] = toScreen(x, y); if (alpha < 1) c.globalAlpha = alpha; drawProp(c, kk, sx, sy, k, ang, e2); c.globalAlpha = 1; } });
+      const hpf = cv.php ? (perPiece ? cv.php[i] : cv.php[Math.min(cv.php.length - 1, Math.floor(t * cv.php.length))]) / cv.maxHp : 1;
+      list.push({ d: x + y, f: () => { const [sx, sy] = toScreen(x, y); if (alpha < 1) c.globalAlpha = alpha; drawWornProp(c, kk, sx, sy, k, ang, e2, hpf, cv.id * 13 + i, cv.kind); c.globalAlpha = 1; } });
     }
     return true;
+  }
+  /* A cover piece as it wears: above 70% as built; below that it slumps (drawn squashed toward the ground, down to
+     about half height near zero), with spilled bits beside it, and below MAP.WORN (where it drops a cover step) it
+     also leans and shows a torn dark top. */
+  function drawWornProp(c, key, sx, sy, k, ang, end, f, seed, kind) {
+    if (f >= .7) { drawProp(c, key, sx, sy, k, ang, end); return; }
+    const sq = .5 + .5 * Math.max(0, f) / .7, r = U.rng(seed + 1);
+    c.save(); c.translate(sx, sy);
+    if (f < MAP.WORN) c.rotate((r() - .5) * .12);
+    c.scale(1 + (1 - sq) * .25, sq);
+    drawProp(c, key, 0, 0, k, ang, end);
+    c.restore();
+    spill(c, kind, sx, sy, k, r, f < MAP.WORN ? 4 : 2, .9);
+  }
+  /* loose bits on the ground: spilled sandbags, tumbled stones, torn brush, scraps of wire or steel */
+  const DEBRIS_COL = { sandbags: ['#8b7b57', '#76694a', '#9a8a63'], wall: ['#a39784', '#8e8370', '#b5aa96'], rubble: ['#9d917e', '#7f7464', '#b0a590'],
+    hedge: ['#4f5c2c', '#3f4a24', '#6a5a3a'], wire: ['#4b4740', '#5a4a32'], tanktrap: ['#3e3e3a', '#55534c'], wreck: ['#2f2d2a', '#45403a'] };
+  function spill(c, kind, sx, sy, k, r, n, spread) {
+    const sp = kind === 'sandbags' ? R.sprites.bag : kind === 'wall' || kind === 'rubble' ? (R.sprites.rubble || R.sprites.stone) : null;
+    const cols = DEBRIS_COL[kind] || DEBRIS_COL.rubble;
+    for (let i = 0; i < n; i++) {
+      const ox = (r() - .5) * 46 * spread * k, oy = (r() - .2) * 16 * spread * k, s2 = k * (.35 + r() * .3);
+      if (sp) { c.drawImage(sp, sx + ox - 12 * s2, sy + oy - 8 * s2, 24 * s2, 15 * s2); continue; }
+      c.fillStyle = cols[i % cols.length];
+      if (kind === 'wire' || kind === 'tanktrap') { c.strokeStyle = cols[i % cols.length]; c.lineWidth = (kind === 'wire' ? 1.1 : 2.6) * k; c.beginPath(); c.moveTo(sx + ox - 6 * k, sy + oy); c.lineTo(sx + ox + 6 * k, sy + oy - (r() - .5) * 6 * k); c.stroke(); }
+      else { c.beginPath(); c.ellipse(sx + ox, sy + oy, (4 + r() * 4) * k, (2.2 + r() * 2) * k, r() * 3, 0, U.TAU); c.fill(); }
+    }
+  }
+  /* what is left where a piece was knocked out (MAP.breakCover): a low heap of its material, flat on the ground */
+  function drawDebris(G, c, k, vis) {
+    for (const d of G.map.debris || []) {
+      if (!vis(d.x, d.y, 60)) continue;
+      const [sx, sy] = toScreen(d.x, d.y), r = U.rng(d.seed + 7);
+      c.fillStyle = 'rgba(40,34,24,.28)'; c.beginPath(); c.ellipse(sx, sy, 22 * k, 10 * k, 0, 0, U.TAU); c.fill();
+      spill(c, d.kind, sx, sy, k, r, d.kind === 'hedge' ? 7 : 6, 1.2);
+    }
+  }
+  /* blast scorch: a dark sooty stain, strong at first, fading to a faint mark over a minute and a half */
+  function drawScorch(G, c, k, vis) {
+    for (const s of G.map.scorch || []) {
+      if (!vis(s.x, s.y, 80)) continue;
+      const a = .5 * Math.max(.3, 1 - (G.t - s.t) / 90), [sx, sy] = toScreen(s.x, s.y), rx = s.r * 32 * k;
+      c.save(); c.translate(sx, sy); c.scale(1, .5);
+      const g = c.createRadialGradient(0, 0, 0, 0, 0, rx);
+      g.addColorStop(0, `rgba(22,18,14,${a})`); g.addColorStop(.55, `rgba(34,28,20,${a * .7})`); g.addColorStop(1, 'rgba(34,28,20,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(0, 0, rx, 0, U.TAU); c.fill();
+      c.restore();
+    }
   }
   function drawCover(c, cv, k) {
     const L = Math.hypot(cv.bx - cv.ax, cv.by - cv.ay);
@@ -1091,10 +1157,11 @@ const RENDER = (() => {
         c.strokeStyle = f.kind === 'flame' || f.flame ? `rgba(255,140,40,${.8 * (1 - age / f.life)})` : `rgba(255,230,150,${.7 * (1 - age / f.life)})`;
         c.lineWidth = (f.kind === 'flame' ? 5 : 1.4) * k; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
       } else if (f.kind === 'boom') {
-        const [sx, sy] = toScreen(f.x, f.y), s = f.big || 1;
-        const t = age / (f.life || 1.4);
-        if (t < .25) { c.globalCompositeOperation = 'lighter'; c.fillStyle = `rgba(255,170,60,${1 - t * 4})`; c.beginPath(); c.arc(sx, sy - 6 * k * s, (10 + t * 90) * k * s, 0, U.TAU); c.fill(); c.globalCompositeOperation = 'source-over'; }
-        for (let i = 0; i < 5; i++) { const a = i * 1.3 + f.x, r = t * 22 * s * k; c.fillStyle = `rgba(70,62,50,${.5 * (1 - t)})`; c.beginPath(); c.arc(sx + Math.cos(a) * r, sy - t * 30 * k * s + Math.sin(a) * r * .5, (8 + t * 18) * k * s, 0, U.TAU); c.fill(); }
+        if (!FOG.shownNow(G, f.x, f.y)) continue;
+        drawBoom(c, f, age, k);
+      } else if (f.kind === 'chunks') {
+        if (!FOG.shownNow(G, f.x, f.y)) continue;
+        drawChunks(c, f, age, k);
       } else if (f.kind === 'order') {
         const [sx, sy] = toScreen(f.x, f.y), t = age / f.life; c.strokeStyle = f.col; c.globalAlpha = 1 - t; c.lineWidth = 2;
         c.beginPath(); c.ellipse(sx, sy, (14 - t * 8) * k, (7 - t * 4) * k, 0, 0, U.TAU); c.stroke(); c.globalAlpha = 1;
@@ -1105,6 +1172,91 @@ const RENDER = (() => {
         c.fillStyle = f.kind === 'pen' ? `rgba(255,120,40,${1 - t})` : `rgba(255,255,200,${1 - t})`; c.beginPath(); c.arc(sx, sy, (f.kind === 'pen' ? 16 : 7) * k * (1 + t), 0, U.TAU); c.fill(); c.globalCompositeOperation = 'source-over';
       }
     }
+  }
+
+  /* An explosion, in layers, all from its seed so every frame draws the same blast:
+     flash (a white-hot core for a tenth of a second), fireball (orange, swelling then gone by half a second), shock ring
+     (a pale ellipse racing out over the ground), earth thrown up (a dark column of dirt for shells and mortars that rises
+     and falls back), flying debris (specks on ballistic arcs) and smoke (grey puffs that climb, drift and thin out). */
+  function drawBoom(c, f, age, k) {
+    const s = f.big || 1, life = f.life || 2.6, r = U.rng(f.seed || ((f.x * 1000 + f.y * 7) | 0) + 1);
+    const [sx, sy] = toScreen(f.x, f.y), S = s * k;
+    const earth = f.src === 'mortar' || f.src === 'shell' || f.src === 'grenade' || !f.src;
+    // smoke first (behind the fire): 7 puffs
+    for (let i = 0; i < 7; i++) {
+      const a0 = r() * U.TAU, d0 = r() * 10, dl = .15 + r() * .35, dx = (r() - .3) * 14, rise = 26 + r() * 30, rad = 9 + r() * 9;
+      const t = (age - dl) / (life - dl); if (t <= 0 || t >= 1) continue;
+      const e = 1 - Math.pow(1 - t, 2);
+      const x = sx + Math.cos(a0) * d0 * S + dx * e * S, y = sy - 8 * S - rise * e * S + Math.sin(a0) * d0 * .5 * S;
+      const g = 70 + i * 6;
+      c.fillStyle = `rgba(${g},${g - 4},${g - 10},${.42 * (1 - t) * Math.min(1, t * 6)})`;
+      c.beginPath(); c.arc(x, y, (rad + 16 * e) * S, 0, U.TAU); c.fill();
+    }
+    // earth thrown up: a column of dirt clods that rise and fall back
+    if (earth && age < 1.1) {
+      // a dusty pillar of earth...
+      const t = age / 1.1, e = 1 - Math.pow(1 - t, 3), ry = (14 + 46 * e) * S;
+      const g = c.createLinearGradient(sx, sy, sx, sy - ry * 2);
+      g.addColorStop(0, `rgba(92,74,50,${.7 * (1 - t)})`); g.addColorStop(1, 'rgba(110,92,66,0)');
+      c.fillStyle = g; c.beginPath(); c.ellipse(sx, sy - ry, (10 + 8 * e) * S, ry, 0, 0, U.TAU); c.fill();
+    }
+    if (earth && age < 1.4) {
+      // ...and clods thrown up out of it that fall back
+      for (let i = 0; i < 12; i++) {
+        const ang = -Math.PI / 2 + (r() - .5) * 1.3, v = 80 + r() * 90, g = 220, t = age;
+        const x = sx + Math.cos(ang) * v * t * .35 * S, y = sy - (Math.sin(-ang) * v * t - .5 * g * t * t) * S;
+        if (y > sy + 2) continue;
+        const a = Math.max(0, 1 - age / 1.4);
+        c.fillStyle = `rgba(${62 + i * 3},${48 + i * 2},${32 + i},${.9 * a})`;
+        c.beginPath(); c.arc(x, y, (3 + r() * 5) * S, 0, U.TAU); c.fill();
+      }
+    }
+    // shock ring on the ground
+    if (age < .4) {
+      const t = age / .4, rr = (8 + 70 * t) * S;
+      c.strokeStyle = `rgba(255,240,210,${.5 * (1 - t)})`; c.lineWidth = (3 - 2 * t) * k;
+      c.beginPath(); c.ellipse(sx, sy, rr, rr * .5, 0, 0, U.TAU); c.stroke();
+    }
+    // fireball and flash (added light)
+    c.globalCompositeOperation = 'lighter';
+    if (age < .55) {
+      const t = age / .55, rad = (14 + 32 * Math.sqrt(t)) * S, y = sy - (8 + 14 * t) * S;
+      const g = c.createRadialGradient(sx, y, 0, sx, y, rad);
+      g.addColorStop(0, `rgba(255,236,170,${.95 * (1 - t)})`); g.addColorStop(.4, `rgba(255,150,50,${.8 * (1 - t)})`); g.addColorStop(1, 'rgba(180,60,10,0)');
+      c.fillStyle = g; c.beginPath(); c.arc(sx, y, rad, 0, U.TAU); c.fill();
+    }
+    if (age < .12) {
+      const t = age / .12;
+      c.fillStyle = `rgba(255,255,235,${1 - t})`; c.beginPath(); c.arc(sx, sy - 6 * S, (16 + 14 * t) * S, 0, U.TAU); c.fill();
+      // a short glow on the ground round it
+      c.fillStyle = `rgba(255,190,110,${.3 * (1 - t)})`; c.beginPath(); c.ellipse(sx, sy, 40 * S, 20 * S, 0, 0, U.TAU); c.fill();
+    }
+    c.globalCompositeOperation = 'source-over';
+    // flying debris: dark specks on arcs, some trailing sparks early on
+    if (age < 1.2) {
+      for (let i = 0; i < 14; i++) {
+        const a = r() * U.TAU, v = 30 + r() * 60, up = 40 + r() * 70, t = age;
+        const z = up * t - 75 * t * t; if (z < 0 && t > .1) continue;
+        const x = sx + Math.cos(a) * v * t * S, y = sy + Math.sin(a) * v * t * .5 * S - z * S;
+        c.fillStyle = i % 4 === 0 && age < .35 ? `rgba(255,200,110,${1 - age / .35})` : `rgba(40,34,26,${1 - age / 1.2})`;
+        c.fillRect(x - 1.5 * k, y - 1.5 * k, 3 * k, 3 * k);
+      }
+    }
+  }
+  /* bits of a cover piece knocked off by a blast or a track: tumbling chunks in the piece's colours, thrown away from
+     the blast, that land and stay a moment */
+  function drawChunks(c, f, age, k) {
+    const r = U.rng(f.seed || 1), cols = DEBRIS_COL[f.mat] || DEBRIS_COL.rubble, t = Math.min(age, .7), fade = 1 - Math.max(0, age - .7) / Math.max(.1, (f.life || 1.2) - .7);
+    const [sx, sy] = toScreen(f.x, f.y, .5);
+    for (let i = 0; i < (f.n || 5); i++) {
+      const a = (f.from || 0) + (r() - .5) * 2.2, v = 1.5 + r() * 3.5, up = 3 + r() * 5;
+      const z = Math.max(0, up * t - 9 * t * t);
+      const wx = Math.cos(a) * v * t, wy = Math.sin(a) * v * t;
+      const px = sx + (wx - wy) * PXM * k, py = sy + (wx + wy) * PXM * .5 * k - z * VZ * k;
+      c.fillStyle = cols[i % cols.length]; c.globalAlpha = Math.max(0, fade);
+      const w = (3 + r() * 4) * k; c.save(); c.translate(px, py); c.rotate(age * (r() * 10 - 5)); c.fillRect(-w / 2, -w / 3, w, w * .66); c.restore();
+    }
+    c.globalAlpha = 1;
   }
 
   /* ---------------- overlay: rings, decorators, orders, ghosts ---------------- */

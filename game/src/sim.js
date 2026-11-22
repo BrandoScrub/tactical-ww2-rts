@@ -1044,7 +1044,18 @@ const SIM = (() => {
       if (!c.alive) continue;
       const can = c.kind === 'wire' || (!v.def.soft && (c.kind === 'sandbags' || c.kind === 'hedge'));
       if (!can) continue;
-      if (U.segDist2(v.x, v.y, c.ax, c.ay, c.bx, c.by) < (v.def.width * .5 + .3) ** 2) MAP.removeCover(G.map, c);
+      const reach = v.def.width * .5 + .3;
+      if (U.segDist2(v.x, v.y, c.ax, c.ay, c.bx, c.by) >= reach * reach) continue;
+      // only the pieces under the tracks go flat; the rest of the line stays standing
+      let near = -1, nd = 1e9;
+      for (let i = 0; i < c.php.length; i++) {
+        const p = MAP.pieceAt(c, i), d = Math.hypot(p.x - v.x, p.y - v.y);
+        if (d < nd) { nd = d; near = i; }
+        if (d < reach + .5) c.php[i] = 0;
+      }
+      c.php[near] = 0;                                   // at least the piece it is on
+      for (let i = 0; i < c.php.length; i++) if (c.php[i] <= 0) { const p = MAP.pieceAt(c, i); G.fx.push({ kind: 'chunks', x: p.x, y: p.y, t: G.t, life: .9, mat: c.kind, n: 5, seed: (G.rng() * 1e6) | 0, from: v.heading }); }
+      MAP.breakCover(G.map, c, G);
     }
   }
 
