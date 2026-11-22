@@ -132,9 +132,14 @@ const MAP = (() => {
     for (const h of halfHouses) { addHouse(h); addHouse({ ...h, x: h.y, y: h.x, w: h.d, d: h.w }, true); }
 
     /* ---- cover segments ---- */
+    /* A cover line is made of pieces about PIECE_M[kind] metres long, each with its own health (hp is per piece).
+       Blasts and tracks wear pieces down; a piece at zero is gone and the line breaks there (see breakCover). */
     const addCover = (kind, ax, ay, bx, by, opts = {}) => {
       const c = { id: m.covers.length, kind, ax, ay, bx, by, hp: opts.hp || 400, maxHp: opts.hp || 400, cover: opts.cover || null,
         blocksV: !!opts.blocksV, blocksI: !!opts.blocksI, owner: opts.owner == null ? -1 : opts.owner, built: opts.built == null ? 1 : opts.built, alive: true };
+      const L = Math.hypot(bx - ax, by - ay), pl = PIECE_M[kind];
+      const n = pl ? Math.max(1, Math.round(L / pl)) : 1;
+      c.php = opts.php ? opts.php.slice() : new Array(n).fill(c.maxHp);
       m.covers.push(c); bucketAdd(m, c); stampCover(m, c, true);
       return c;
     };
@@ -224,6 +229,54 @@ const MAP = (() => {
       if (x >= 0 && y >= 0 && x < m.w && y < m.h && U.dist2(x + .5, y + .5, c.x, c.y) <= c.r * c.r) { const i = y * m.w + x; if (m.area[i] !== 2) m.area[i] = 1; }
   }
 
+  /* ---- cover pieces: damage, breaking apart, debris ---- */
+  const PIECE_M = { sandbags: 1, wall: 1, hedge: 1, rubble: 1, wire: 2, tanktrap: 2 };   // wrecks are one piece
+  const pieceAt = (c, i) => { const n = c.php.length, t = (i + .5) / n; return { x: c.ax + (c.bx - c.ax) * t, y: c.ay + (c.by - c.ay) * t }; };
+  /* how worn the piece nearest (x, y) is: its health over full */
+  function pieceFrac(c, x, y) {
+    const n = c.php.length; if (n === 1) return c.php[0] / c.maxHp;
+    const dx = c.bx - c.ax, dy = c.by - c.ay, t = U.clamp(((x - c.ax) * dx + (y - c.ay) * dy) / (dx * dx + dy * dy || 1), 0, .9999);
+    return c.php[Math.floor(t * n)] / c.maxHp;
+  }
+  /* every live cover line within r of (x, y) */
+  function coversIn(m, x, y, r) {
+    const out = new Set();
+    for (const gx of [-r, 0, r]) for (const gy of [-r, 0, r]) for (const c of coversNear(m, x + gx, y + gy)) if (c.alive && U.segDist2(x, y, c.ax, c.ay, c.bx, c.by) < r * r) out.add(c);
+    return [...out];
+  }
+  /* knock dmg off piece i; returns true if that piece is now gone */
+  function hurtPiece(c, i, dmg) {
+    if (c.php[i] <= 0) return false;
+    c.php[i] -= dmg; c.hp = Math.min(...c.php);
+    return c.php[i] <= 0;
+  }
+  /* Pieces at zero are taken out. A finished line splits into the runs of pieces still standing (each run a cover line
+     of its own); one still being built is lost whole. Each lost piece leaves debris on the ground. */
+  function breakCover(m, c, G) {
+    const dead = c.php.map(h => h <= 0);
+    if (!dead.some(Boolean)) return;
+    for (let i = 0; i < dead.length; i++) if (dead[i]) addDebris(m, c, pieceAt(c, i), G);
+    removeCover(m, c);
+    if (c.built < 1 || c.kind === 'wreck') return;
+    const n = c.php.length;
+    for (let i = 0; i < n;) {
+      if (dead[i]) { i++; continue; }
+      let j = i; while (j + 1 < n && !dead[j + 1]) j++;
+      const t0 = i / n, t1 = (j + 1) / n;
+      const d = m.addCover(c.kind, c.ax + (c.bx - c.ax) * t0, c.ay + (c.by - c.ay) * t0, c.ax + (c.bx - c.ax) * t1, c.ay + (c.by - c.ay) * t1,
+        { cover: c.cover, blocksV: c.blocksV, blocksI: c.blocksI, hp: c.maxHp, owner: c.owner, built: c.built, php: c.php.slice(i, j + 1) });
+      d.hp = Math.min(...d.php); if (c.house != null) d.house = c.house; d.blocksIWhenBuilt = c.blocksIWhenBuilt; d.buildTime = c.buildTime; d.from = c.from == null ? c.id : c.from;
+      i = j + 1;
+    }
+  }
+  /* what is left of a piece: spilled bags, tumbled stones, torn brush, a twisted picket. Drawn flat on the ground. */
+  function addDebris(m, c, p, G) {
+    const d = m.debris || (m.debris = []);
+    d.push({ kind: c.kind, x: p.x, y: p.y, ang: Math.atan2(c.by - c.ay, c.bx - c.ax), len: Math.hypot(c.bx - c.ax, c.by - c.ay) / c.php.length,
+      owner: c.owner, built: c.built >= 1, seed: (c.id * 31 + d.length * 7) & 1023, t: G ? G.t : 0 });
+    if (d.length > 400) d.splice(0, d.length - 400);
+  }
+
   /* ---- cover segment bookkeeping ---- */
   const BK = 8;
   function bucketKeys(c) {
@@ -256,6 +309,9 @@ const MAP = (() => {
     for (const o of m.covers) if (o.alive && o !== c && (o.blocksV || o.blocksI) && U.segDist2(o.ax, o.ay, c.ax, c.ay, c.bx, c.by) < 9) stampCover(m, o, true);
   }
 
+  /* a piece knocked below WORN of its health is a slumped heap: one step less cover (heavy to light, light to none) */
+  const WORN = .4;
+  function worn(c, k, x, y) { return pieceFrac(c, x, y) >= WORN ? k : k === 'heavy' ? 'light' : 'none'; }
   /* Cover a model at (x, y) gets against fire from (sx, sy): the best of ground cover under it and any cover segment
      within 1.6 m that lies between it and the shooter. Elevated or flanking shooters get no segment cover. */
   function coverAt(m, x, y, sx, sy) {
@@ -263,7 +319,7 @@ const MAP = (() => {
     const i = (y | 0) * m.w + (x | 0), a = m.area[i] || 0;
     if (a === 1) best = 'light'; else if (a === 3) best = 'negative';
     if (sx == null) {
-      for (const c of coversNear(m, x, y)) if (c.alive && c.cover && c.built >= 1 && U.segDist2(x, y, c.ax, c.ay, c.bx, c.by) < 1.6 * 1.6) { if (c.cover === 'heavy') return 'heavy'; best = 'light'; }
+      for (const c of coversNear(m, x, y)) if (c.alive && c.cover && c.built >= 1 && U.segDist2(x, y, c.ax, c.ay, c.bx, c.by) < 1.6 * 1.6) { const k = worn(c, c.cover, x, y); if (k === 'heavy') return 'heavy'; if (k === 'light') best = 'light'; }
       return best;
     }
     for (const c of coversNear(m, x, y)) {
@@ -272,7 +328,7 @@ const MAP = (() => {
       // the segment must be between: the shot line from shooter to a point just past the model crosses it
       const dx = x - sx, dy = y - sy, L = Math.hypot(dx, dy) || 1;
       const px = x + dx / L * .4, py = y + dy / L * .4, qx = x - dx / L * 2.4, qy = y - dy / L * 2.4;
-      if (U.segX(qx, qy, px, py, c.ax, c.ay, c.bx, c.by)) { if (c.cover === 'heavy') return 'heavy'; if (best !== 'heavy') best = 'light'; }
+      if (U.segX(qx, qy, px, py, c.ax, c.ay, c.bx, c.by)) { const k = worn(c, c.cover, x, y); if (k === 'heavy') return 'heavy'; if (k === 'light' && best !== 'heavy') best = 'light'; }
     }
     return best;
   }
@@ -460,6 +516,6 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, mainRegion, removeCover, stampCover, stampCrater, BI, BV, BL };
+  return { PIECE_M, WORN, pieceAt, pieceFrac, coversIn, hurtPiece, breakCover, hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, mainRegion, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;

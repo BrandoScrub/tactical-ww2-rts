@@ -28,21 +28,23 @@ const COMBAT = (() => {
   }
   function stepSuppression(G, sq, dt) {
     const S = D.SUPP, cov = D.COVER[squadCover(G, sq)] || D.COVER.none;
-    sq.supp = Math.max(0, sq.supp - S.recover * cov.recover * dt * (sq.retreating ? 3 : 1));
+    // suppression only wears off once the squad is no longer being shot at (CoH series rule)
+    if (sq.retreating || G.t - (sq.suppHitT || -99) > S.recoverDelay) sq.supp = Math.max(0, sq.supp - S.recover * cov.recover * dt * (sq.retreating ? 3 : 1));
     if (sq.suppState === 2) { if (sq.supp < S.pinned - .15) sq.suppState = 1; }
-    else if (sq.suppState === 1) { if (sq.supp >= S.pinned) { sq.suppState = 2; SIM.event(G, sq.owner, 'pinned', sq.def.name + ' pinned!', sq.x, sq.y); } else if (sq.supp < S.suppressed - .05) sq.suppState = 0; }
+    else if (sq.suppState === 1) { if (sq.supp >= S.pinned) { sq.suppState = 2; SIM.event(G, sq.owner, 'pinned', sq.def.name + ' pinned!', sq.x, sq.y); if (G.stats) G.stats.pin(G, sq); } else if (sq.supp < S.suppressed - .05) sq.suppState = 0; }
     else if (sq.supp >= S.suppressed) sq.suppState = 1;
     if (sq.retreating) sq.suppState = Math.min(sq.suppState, 0);
     // pinned squads stop where they are
     if (sq.suppState === 2 && sq.path && sq.path.length && !sq.retreating) { sq.path = null; sq.order = { type: 'idle' }; }
   }
-  function addSupp(G, sq, amount, sx, sy) {
+  function addSupp(G, sq, amount, sx, sy, src) {
     if (sq.retreating || sq.type !== 'squad') return;
     const al = sq.models.filter(m => m.alive); if (!al.length) return;
     let ck = sq.garrison != null ? 'garrison' : MAP.coverAt(G.map, al[0].x, al[0].y, sx, sy);
     if ((ck === 'light' || ck === 'heavy') && MAP.hAt(G.map, sx, sy) - MAP.hAt(G.map, al[0].x, al[0].y) >= HIGH) ck = 'none';
     const cov = D.COVER[ck] || D.COVER.none;
     sq.supp = Math.min(D.SUPP.cap, sq.supp + amount * cov.supp * (sq.def.crewWeapon ? .5 : 1));
+    sq.suppHitT = G.t; if (src) sq.suppBy = src.id;
   }
 
   /* ---------------- targets ---------------- */
@@ -96,6 +98,8 @@ const COMBAT = (() => {
       if (wantV && c.e.type !== 'vehicle') s += 60;
       if (!wantV && c.e.type === 'vehicle') s += 40;
       if (c.e.type === 'squad' && c.e.retreating) s += 15;
+      // a machine gun sweeps on: once a squad is pinned it moves to one that is still free to advance (series behaviour)
+      if (w.kind === 'mg' && c.e.type === 'squad' && c.e.suppState === 2) s += 12;
       if (s < bs) { bs = s; best = c.e; }
     }
     return best;
@@ -150,7 +154,7 @@ const COMBAT = (() => {
         } else sq.pivotT = 0;
         if (t && sq.cwCd <= 0) {
           const d = Math.hypot(t.x - c.x, t.y - c.y), rpm = U.profile(w3(cw.rpm), cw.rng, d) * vb.rof;
-          sq.cwCd = 60 / rpm;
+          sq.cwCd = Math.max(sq.cwCd, -dt) + 60 / rpm;   // carry the remainder so fast guns keep their real rate at 20 steps a second
           const gunner = alive[0];
           if (cw.kind === 'indirect') lobShell(G, sq, c, cw, t.x, t.y);
           else fireWeapon(G, sq, { x: c.x, y: c.y }, cw, t, vb, false, gunner);
@@ -178,7 +182,7 @@ const COMBAT = (() => {
       if (!t) { m.cd = .25; m.aimT = 0; continue; }
       if (w.aim) { m.aimT += .25; if (m.aimT < w.aim) { m.cd = .25; m.aim = Math.atan2(t.y - m.y, t.x - m.x); continue; } m.aimT = 0; }
       const d = Math.hypot(t.x - m.x, t.y - m.y), rpm = U.profile(w3(w.rpm), w.rng, d) * vb.rof * (sq.suppState === 1 ? .7 : 1);
-      m.cd = 60 / rpm * U.lerp(.85, 1.15, G.rng());
+      m.cd = Math.max(m.cd, -dt) + 60 / rpm * U.lerp(.85, 1.15, G.rng());
       fireWeapon(G, sq, m, w, t, vb, sq.moving, m);
       if (sq.order.type === 'attackMove') sq.engageT = G.t + 1.5;
       m.since = 0; m.aim = Math.atan2(t.y - m.y, t.x - m.x); fired = true;
@@ -246,7 +250,7 @@ const COMBAT = (() => {
       if (!t || ws.cd > 0) return;
       if (i === 0 && main.turret) { const want = Math.atan2(t.y - v.y, t.x - v.x); if (Math.abs(U.angNorm(want - v.turret)) > .08) return; }
       const d = Math.hypot(t.x - v.x, t.y - v.y), rpm = U.profile(w.rpm, w.rng, d) * vb.rof;
-      ws.cd = 60 / rpm * U.lerp(.9, 1.1, G.rng());
+      ws.cd = Math.max(ws.cd, -dt) + 60 / rpm * U.lerp(.9, 1.1, G.rng());
       const from = muzzle(v, i);
       fireWeapon(G, v, from, w, t, vb, v.speed > .5, null);
       if (v.order.type === 'attackMove' && i === 0) v.engageT = G.t + 2;
@@ -276,8 +280,8 @@ const COMBAT = (() => {
       if (w.supp) {
         const sps = U.lerp(w.supp, w.suppFar || w.supp, U.clamp((d - w.rng[0]) / Math.max(1, w.rng[2] - w.rng[0]), 0, 1));
         const per = sps * 60 / U.profile(w.rpm, w.rng, d);
-        addSupp(G, t, per, from.x, from.y);
-        if (w.suppRadius) for (const o of G.ents) if (o !== t && o.type === 'squad' && !o.dead && o.owner === t.owner && U.dist2(o.x, o.y, tm.x, tm.y) < w.suppRadius * w.suppRadius) addSupp(G, o, per * .5, from.x, from.y);
+        addSupp(G, t, per, from.x, from.y, src);
+        if (w.suppRadius) for (const o of G.ents) if (o !== t && o.type === 'squad' && !o.dead && o.owner === t.owner && U.dist2(o.x, o.y, tm.x, tm.y) < w.suppRadius * w.suppRadius) addSupp(G, o, per * .5, from.x, from.y, src);
       }
       if (w.kind === 'small' || w.kind === 'mg' || w.kind === 'sniper' || w.kind === 'flame') {
         if (G.rng() < (w.kind === 'mg' ? .25 : .12)) G.fx.push({ kind: 'tracer', ax: from.x, ay: from.y, bx: tm.x + (G.rng() - .5), by: tm.y + (G.rng() - .5), t: G.t, life: .12, flame: w.kind === 'flame' });
@@ -329,8 +333,14 @@ const COMBAT = (() => {
     for (const s of m.smokes) { const age = G.t - s.t0; s.r = s.R * Math.min(1, age / 2) * (age > s.life - 5 ? Math.max(0, (s.life - age) / 5) : 1); }
     m.smokes = m.smokes.filter(s => G.t - s.t0 < s.life);
   }
+  /* Ranging in (stand-in, after how crews walked rounds onto a target): each shell at the same spot (within RANGING.near m
+     of the last aim, within RANGING.keep s) is laid tighter, down to RANGING.min of the first shell's scatter. */
+  const RANGING = { near: 6, keep: 25, step: .12, min: .64, standIn: true };
   function lobShell(G, sq, from, w, x, y, barrage, smoke) {
-    const d = Math.hypot(x - from.x, y - from.y), sc = U.profile(w.scatter, w.rng, d) * (barrage ? 1 : 1);
+    const z = sq.zero;
+    const n = z && G.t - z.t < RANGING.keep && Math.hypot(z.x - x, z.y - y) < RANGING.near ? z.n + 1 : 0;
+    sq.zero = { x, y, t: G.t, n };
+    const d = Math.hypot(x - from.x, y - from.y), sc = U.profile(w.scatter, w.rng, d) * Math.max(RANGING.min, 1 - RANGING.step * n);
     const a = G.rng() * U.TAU, r = Math.sqrt(G.rng()) * sc * .5;
     G.projectiles.push({ kind: 'mortar', ax: from.x, ay: from.y, x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, t0: G.t, t1: G.t + (w.flight || 3), w, src: sq.id, owner: sq.owner, arc: 1, smoke: smoke || null });
     G.fx.push({ kind: 'muzzle', x: from.x, y: from.y, t: G.t, big: 1, life: .2, up: true });
@@ -347,8 +357,8 @@ const COMBAT = (() => {
       const src = G.byId.get(p.src);
       if (p.kind === 'grenade' && p.ab.smoke) popSmoke(G, p.x, p.y, p.ab.smoke);
       else if (p.kind === 'mortar' && p.smoke) popSmoke(G, p.x, p.y, p.smoke);
-      else if (p.kind === 'grenade') explode(G, p.x, p.y, p.ab.dmg, p.ab.aoe, 20, src, p.owner, 1);
-      else if (p.kind === 'mortar') explode(G, p.x, p.y, p.w.dmg, p.w.aoe, p.w.pen[0], src, p.owner, 1.2);
+      else if (p.kind === 'grenade') explode(G, p.x, p.y, p.ab.dmg, p.ab.aoe, 20, src, p.owner, 1, 'grenade');
+      else if (p.kind === 'mortar') explode(G, p.x, p.y, p.w.dmg, p.w.aoe, p.w.pen[0], src, p.owner, 1.2, 'mortar');
       else if (p.vs) {
         const v = G.byId.get(p.vs);
         if (v && !v.dead && p.hit) {
@@ -359,27 +369,35 @@ const COMBAT = (() => {
       } else if (p.vsB) {
         const b = G.byId.get(p.vsB); if (b && !b.dead) damageBuilding(G, b, p.w.dmg * (p.w.kind === 'at' ? .5 : 1), src);
         G.fx.push({ kind: 'boom', x: p.x, y: p.y, t: G.t, big: .6, life: 1 });
-      } else explode(G, p.x, p.y, p.w.dmg, p.w.aoe || 1.5, p.w.pen[0], src, p.owner, .8);
+      } else explode(G, p.x, p.y, p.w.dmg, p.w.aoe || 1.5, p.w.pen[0], src, p.owner, .8 + Math.min(.6, (p.w.aoe || 1.5) * .15), 'shell');
     }
     G.projectiles = keep;
   }
-  /* explosion: damage falls from full at the centre to a tenth at the edge; heavy cover between halves it */
-  function explode(G, x, y, dmg, radius, pen, src, owner, size) {
-    G.fx.push({ kind: 'boom', x, y, t: G.t, big: size, life: 1.4 });
+  /* Explosion: damage falls from full at the centre to a tenth at the edge. Heavy cover between halves it against flat
+     fire; a shell dropping from above (mortar) is only cut by a fifth. Near misses out to SHAKE x the radius suppress.
+     Cover lines lose health piece by piece (see MAP.breakCover). kind: 'mortar' | 'grenade' | 'shell'. */
+  const BLAST = { shake: 2, supp: .3, heavyFlat: .5, heavyFromAbove: .65, chipFloor: .35,
+    chip: { sandbags: 1.3, hedge: 1.5, wire: 1.2, wall: .8, tanktrap: .4, rubble: .5, wreck: .3 }, standIn: true };
+  function explode(G, x, y, dmg, radius, pen, src, owner, size, kind) {
+    G.fx.push({ kind: 'boom', x, y, t: G.t, big: size, life: 2.6, src: kind || 'shell', seed: (G.rng() * 1e6) | 0 });
     if (G.rng() < .5) { const c = { x, y, r: .9 + radius * .25 }; G.map.craters.push(c); MAP.stampCrater(G.map, c); G.map.craterVer = (G.map.craterVer || 0) + 1; }
+    (G.map.scorch || (G.map.scorch = [])).push({ x, y, r: .6 + radius * .45 * size, t: G.t });
+    if (G.map.scorch.length > 120) G.map.scorch.shift();
+    G.shake = Math.max(G.shake || 0, .35 * size);
+    G.shakeAt = { x, y, t: G.t };
+    const heavyK = kind === 'mortar' ? BLAST.heavyFromAbove : BLAST.heavyFlat, R2 = radius * BLAST.shake;
     for (const e of G.ents) {
       if (e.dead) continue;
       if (e.type === 'squad') {
-        let any = false;
+        let near = 1e9;
         for (const m of e.models) {
           if (!m.alive) continue;
-          const r = Math.hypot(m.x - x, m.y - y); if (r > radius) continue;
-          any = true;
+          const r = Math.hypot(m.x - x, m.y - y); near = Math.min(near, r); if (r > radius) continue;
           const C = D.COVER[MAP.coverAt(G.map, m.x, m.y, x, y)] || D.COVER.none;
           const f = Math.max(.1, 1 - r / radius);
-          damageModel(G, e, m, dmg * f * (C === D.COVER.heavy ? .5 : 1) * (e.retreating ? .7 : 1), src);
+          damageModel(G, e, m, dmg * f * (C === D.COVER.heavy ? heavyK : 1) * (e.retreating ? .7 : 1), src);
         }
-        if (any && e.owner !== owner) addSupp(G, e, .25 * size, x, y);
+        if (near < R2 && e.owner !== owner) addSupp(G, e, BLAST.supp * size * (1 - near / R2 * .7), x, y, src);
       } else if (e.type === 'vehicle') {
         const r = Math.hypot(e.x - x, e.y - y); if (r > radius + e.def.length / 2) continue;
         if (G.rng() < Math.min(1, pen / e.def.armor[2])) damageVehicle(G, e, dmg * .4 * Math.max(.2, 1 - r / (radius + 2)), src);
@@ -391,10 +409,22 @@ const COMBAT = (() => {
     for (const d of G.drops || []) if (U.dist2(d.x, d.y, x, y) < radius * radius) d.hp -= dmg * .5;
     // houses take blast damage (half the blast; small arms never hurt them), and collapse at zero
     for (const h of G.map.houses) if (!h.dead && Math.abs(h.x - x) < h.w / 2 + radius && Math.abs(h.y - y) < h.d / 2 + radius) SIM.damageHouse(G, h, dmg * .5, src);
-    // cover objects take blast damage
-    for (const c of MAP.coversNear(G.map, x, y)) {
-      if (!c.alive) continue;
-      if (U.segDist2(x, y, c.ax, c.ay, c.bx, c.by) < radius * radius) { c.hp -= dmg * .6; if (c.hp <= 0) MAP.removeCover(G.map, c); }
+    // cover lines are worn down piece by piece; a broken piece leaves a gap and debris
+    chipCover(G, x, y, dmg, radius);
+  }
+  function chipCover(G, x, y, dmg, radius) {
+    const reach = radius + .6;
+    for (const c of MAP.coversIn(G.map, x, y, reach)) {
+      const k = BLAST.chip[c.kind] == null ? 1 : BLAST.chip[c.kind];
+      let broke = false;
+      for (let i = 0; i < c.php.length; i++) {
+        const p = MAP.pieceAt(c, i), r = Math.hypot(p.x - x, p.y - y); if (r > reach) continue;
+        const was = c.php[i] / c.maxHp;
+        if (MAP.hurtPiece(c, i, dmg * .6 * k * Math.max(BLAST.chipFloor, 1 - r / reach))) broke = true;
+        // chunks fly off the piece that was hit
+        if (c.php[i] / c.maxHp < was) G.fx.push({ kind: 'chunks', x: p.x, y: p.y, t: G.t, life: 1.2, mat: c.kind, n: c.php[i] <= 0 ? 9 : 4, seed: (G.rng() * 1e6) | 0, from: Math.atan2(p.y - y, p.x - x) });
+      }
+      if (broke) MAP.breakCover(G.map, c, G);
     }
   }
 
@@ -417,6 +447,7 @@ const COMBAT = (() => {
     m.hp -= dmg; hurtEvent(G, sq); xpFor(G, src, sq, Math.min(dmg, m.hp + dmg));
     if (m.hp <= 0) {
       m.alive = false; m.deadT = G.t;
+      if (G.stats) G.stats.kill(G, src, sq);
       (G.corpses = G.corpses || []).push({ x: m.x, y: m.y, heading: m.heading, sprite: m.sprite, side: G.players[sq.owner].side, t0: G.t, id: G.rng() * 1000 | 0 });
       sq.slots = null;
       SIM.onModelDeath(G, sq, m);
@@ -454,6 +485,6 @@ const COMBAT = (() => {
     if (b.hp <= 0) { SIM.event(G, b.owner, 'lost', b.def.name + ' destroyed', b.x, b.y); SIM.kill(G, b); }
   }
 
-  return { MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
+  return { BLAST, RANGING, MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;
