@@ -586,6 +586,13 @@ const HUD = (() => {
     }
     // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
     const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
+    // an unfinished position of ours: selected builders go and finish it
+    if (hh && hh.pit && hh.built < 1 && hh.owner === 0) {
+      const builders = sel.filter(s => s.def && s.def.builder && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
+      if (builders.length) { issue(G, [builders[0].id], { type: 'build', what: hh.defId, x: hh.x, y: hh.y }, Q); marker(hh.x, hh.y, '#ffe27a'); }
+      else flash('Not finished yet: send engineers to finish it');
+      return;
+    }
     if (hh && (hh.occ == null || (G.byId.get(hh.occ) || {}).owner === 0)) {
       const inf = sel.filter(s => s.type === 'squad' && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
       if (inf.length) {

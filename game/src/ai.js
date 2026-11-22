@@ -14,6 +14,10 @@ const AI = (() => {
      fuel for the next building for the whole game and never fielded a vehicle */
   const VEH_BEFORE_TECH = [0, 0, 1, 2];
   const isFightingVehicle = def => def && def.armor && (def.cost.fu || 0) > 0 && !def.reinforces;
+  /* what can hurt armour: anti-tank guns and rockets, and cannon that go through a light tank's front */
+  const isAntiTank = def => !!def && (def.weapons || []).some(x => D.W[x] && (D.W[x].kind === 'at' || (D.W[x].kind === 'cannon' && D.W[x].pen[0] > 150)));
+  /* enemy armour seen is remembered this long (s): it drives off, but it is still out there */
+  const ARMOUR_MEMORY = 150;
   function step(G, slot) {
     const S = (G.ai || (G.ai = {}))[slot] || (G.ai[slot] = {}), me = G.players[slot];
     if ((S.t || 0) > G.t) return;
@@ -39,12 +43,22 @@ const AI = (() => {
         const free = e => e.type === 'squad' && !e.retreating && e.garrison == null && !e.def.builder && e.order.type !== 'attack' && e.suppState < 2;
         const near = (e, r) => U.dist2(e.x, e.y, h.x, h.y) < r * r;
         const hmg = mine.filter(e => free(e) && e.def.crewWeapon === 'tripod_mg' && near(e, 45)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
-        const inf = hmg ? null : mine.filter(e => free(e) && !e.crew && near(e, 18)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
+        // riflemen only when there is something coming: an empty position on a quiet flank is left for a machine gun
+        const threat = G.ents.some(o => !o.dead && o.owner === 1 - me.slot && o.type !== 'building' && U.dist2(o.x, o.y, h.x, h.y) < 55 * 55 && FOG.visible(G, me.slot, o));
+        const inf = hmg || !threat ? null : mine.filter(e => free(e) && !e.crew && near(e, 18)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
         const who = hmg || inf; if (who) SIM.issue(G, [who.id], { type: 'garrison', house: h.id });
       }
     }
     if (G.t < FORT.from || (S.fortT || 0) > G.t) return;
     S.fortT = G.t + FORT.every;
+    // a position left half dug (its diggers retreated or died): a free builder goes back and finishes it
+    const half = G.map.houses.find(h => h.pit && !h.dead && h.built < 1 && h.owner === me.slot && !mine.some(e => e.buildQueue && e.buildQueue.some(j => j.kind === 'pit' && j.id === h.id)));
+    if (half) {
+      const b = mine.filter(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type !== 'build' && e.order.type !== 'repair' && e.suppState < 1 && G.t - e.lastHit > 8)
+        .sort((x, y) => U.dist2(x.x, x.y, half.x, half.y) - U.dist2(y.x, y.y, half.x, half.y))[0];
+      if (b) SIM.issue(G, [b.id], { type: 'build', what: half.defId, x: half.x, y: half.y });
+      return;                                              // no new one while one is still open
+    }
     const id = me.side + '_position', def = D.DEFENCES[id]; if (!def) return;
     const b = mine.find(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type !== 'build' && e.order.type !== 'repair' && !e.buildQueue.length && !e.fortQueue && G.t - e.lastHit > 5);
     if (!b || me.res.mp < (def.cost.mp || 0) + FORT.spare) return;
@@ -84,7 +98,27 @@ const AI = (() => {
     const vehicles = mine.filter(e => e.type === 'vehicle' && isFightingVehicle(e.def)).length + queuedUnits.filter(u => isFightingVehicle(SIM.unitDef(u))).length;
     const vehOpts = PLAN[me.side].mid.concat(PLAN[me.side].late).map(([u]) => u).filter((u, i, a) => a.indexOf(u) === i && isFightingVehicle(SIM.unitDef(u)) && buildings.some(b => b.built >= 1 && b.def.produce.includes(u)));
     const vehShort = vehOpts.length > 0 && ti >= 0 && vehicles < VEH_BEFORE_TECH[ti] && G.t < [0, 0, 600, 840][ti];
-    const wantTech = next && !vehShort && (army >= [0, 4, 6, 8][ti] || G.t > [0, 220, 330, 480][ti]);
+    // enemy armour: what is in sight now, remembered for a while
+    const armourNow = G.ents.filter(e => !e.dead && e.owner !== me.slot && e.owner >= 0 && e.type === 'vehicle' && e.def.armor && FOG.visible(G, me.slot, e)).length;
+    if (armourNow >= (S.armour || 0) || G.t - (S.armourT || 0) > ARMOUR_MEMORY) { S.armour = armourNow; S.armourT = G.t; }
+    const enemyV = S.armour || 0;
+    // ...and what we have against it. Short of it, an anti-tank unit comes before the next building, before the vehicle
+    // being saved for and before more riflemen. (Before: the Motor Pool was kept free for a vehicle the fuel never
+    // came for, so the American AI never built an anti-tank gun; and once it began saving 140 fuel for the Tank Depot
+    // it bought no vehicle either, for the rest of the match.)
+    const antiTank = mine.filter(e => e.type !== 'building' && isAntiTank(e.def)).length + queuedUnits.filter(u => isAntiTank(SIM.unitDef(u))).length;
+    let counter = null;
+    if (enemyV > 0 && antiTank < Math.min(3, enemyV)) {
+      const mpRate = Math.max(60, me.income ? me.income.mp : 240) / 60, fuRate0 = Math.max(1, me.income ? me.income.fu : 6) / 60;
+      const wait = u => { const c = SIM.unitDef(u).cost; return Math.max(0, ((c.mp || 0) - me.res.mp) / mpRate, ((c.fu || 0) - me.res.fu) / fuRate0); };
+      const opts = [...new Set(buildings.filter(b => b.built >= 1).flatMap(b => b.def.produce))].filter(u => isAntiTank(SIM.unitDef(u)));
+      // the one that can be had soonest; of those within 20 s of each other, the one that costs more (the better one)
+      if (opts.length) { const w0 = Math.min(...opts.map(wait)); counter = opts.filter(u => wait(u) <= w0 + 20).sort((a, b) => (SIM.unitDef(b).cost.fu || 0) - (SIM.unitDef(a).cost.fu || 0) || (SIM.unitDef(b).cost.mp || 0) - (SIM.unitDef(a).cost.mp || 0))[0]; }
+    }
+    // the next building's fuel is minutes away and there is no vehicle out: a vehicle now is worth more than a tank later
+    const techFuel = next ? (D.BUILDINGS[next].cost.fu || 0) - me.res.fu : 0;
+    const techFar = vehOpts.length > 0 && vehicles < 1 && techFuel / (Math.max(1, me.income ? me.income.fu : 6) / 60) > 180;
+    const wantTech = next && !vehShort && !techFar && !counter && (army >= [0, 4, 6, 8][ti] || G.t > [0, 220, 330, 480][ti]);
     // base buildings are ordered from the HQ and raise themselves
     const hqB = SIM.hqOf(G, me.slot);
     if (wantTech && hqB && SIM.canAfford(me, D.BUILDINGS[next].cost) && !buildings.some(b => b.built < 1)) {
@@ -115,18 +149,28 @@ const AI = (() => {
     } else S.saveFor = null;
     const phase = G.t < 240 ? 'early' : (owned.has(tech[3]) ? 'late' : 'mid');
     const wishes = PLAN[me.side][phase].concat(phase === 'late' ? PLAN[me.side].mid.map(([u, w]) => [u, w * .4]) : []);
-    // counter enemy armour
-    const enemyV = G.ents.filter(e => !e.dead && e.owner !== me.slot && e.type === 'vehicle' && FOG.visible(G, me.slot, e)).length;
+    // the anti-tank unit's manpower comes first; fuel already being kept for a vehicle stays kept
+    if (counter) { const c = SIM.unitDef(counter).cost; reserve = { mp: c.mp || 0, fu: Math.max(c.fu || 0, saveFor ? reserve.fu || 0 : 0) }; }
     for (const b of buildings) {
       if (b.built < 1 || b.queue.length >= 1) continue;
+      // one anti-tank unit is out and the vehicle being saved for can be paid for now: the vehicle goes first, so a
+      // building that makes both (the Motor Pool) doesn't turn out guns only
+      const vehNow = saveFor && antiTank >= 1 && b.def.produce.includes(saveFor) && SIM.canAfford(me, SIM.unitDef(saveFor).cost) && !SIM.prodBlock(G, b, saveFor);
+      if (counter && b.def.produce.includes(counter) && !vehNow) {
+        if (SIM.canAfford(me, SIM.unitDef(counter).cost) && !SIM.prodBlock(G, b, counter)) { SIM.issue(G, [b.id], { type: 'produce', unit: counter }); counter = null; reserve = { mp: 0, fu: saveFor ? reserve.fu || 0 : 0 }; }
+        continue;   // this building waits for the anti-tank unit
+      }
       if (saveFor && b.def.produce.includes(saveFor)) {
-        if (SIM.canAfford(me, SIM.unitDef(saveFor).cost) && !SIM.prodBlock(G, b, saveFor)) { SIM.issue(G, [b.id], { type: 'produce', unit: saveFor }); S.saveFor = null; saveFor = null; reserve = { mp: 0, fu: 0 }; }
+        if (SIM.canAfford(me, SIM.unitDef(saveFor).cost) && !SIM.prodBlock(G, b, saveFor)) { SIM.issue(G, [b.id], { type: 'produce', unit: saveFor }); S.saveFor = null; saveFor = null; reserve = { mp: counter ? reserve.mp : 0, fu: 0 }; }
         continue;   // this building waits for the vehicle
       }
       const opts = wishes.filter(([u]) => b.def.produce.includes(u)).map(([u, w]) => {
         const def = SIM.unitDef(u);
         let ww = w;
-        if (enemyV && (def.weapons || []).some(x => D.W[x] && (D.W[x].kind === 'at' || (D.W[x].kind === 'cannon' && D.W[x].pen[0] > 150)))) ww *= 1 + enemyV;
+        if (enemyV && isAntiTank(def)) ww *= 1 + enemyV;
+        // fuel is being kept for something else: don't settle on a unit that needs it (the pick is kept until bought, so
+        // a building that picked a vehicle while the fuel was spoken for built nothing at all)
+        if ((def.cost.fu || 0) && me.res.fu - def.cost.fu < (reserve.fu || 0) * .8) ww = 0;
         if (def.builder && builders.length + (builderQueued ? 1 : 0) >= (G.t > 300 ? 2 : 1)) ww = 0;
         const have = mine.filter(e => e.defId === u).length + G.ents.filter(x => x.type === 'building' && x.owner === me.slot && x.queue.some(q => q.unit === u)).length;
         const cap = CAP[u] != null ? CAP[u] : 99; if (have >= cap) ww = 0;
@@ -432,6 +476,16 @@ const AI = (() => {
             if (spot) { SIM.issue(G, [e.id], { type: 'move', x: spot.x, y: spot.y, face }); continue; }
           }
         }
+      }
+      // holding a fighting position: stay in it while the point it guards is ours or contested, and for a while after
+      // getting in. Without this the goal picker sent the squad off to another point and the manning rule put the next
+      // squad in, over and over (46 changes of occupant in one position in a 15-minute match).
+      if (e.type === 'squad' && e.garrison != null && G.map.houses[e.garrison] && G.map.houses[e.garrison].pit) {
+        const h = G.map.houses[e.garrison];
+        if (e.pitId !== h.id) { e.pitId = h.id; e.pitT = G.t; }
+        const guarded = pts.some(p => p.owner !== enemy && U.dist2(p.x, p.y, h.x, h.y) < 26 * 26);
+        // a machine gun keeps the position; riflemen only for a while and while there is someone to shoot at
+        if (guarded && e.crew || G.t - e.pitT < 60 || visibleEnemies.some(o => U.dist2(o.x, o.y, h.x, h.y) < 45 * 45)) continue;
       }
       // busy moving or fighting: let it be, but re-target now and then
       const busy = (e.path && e.path.length) || e.order.type === 'attack' || (e.crew && e.crew.state !== 'packed' && G.t - e.lastFire < 8) || (G.t - e.lastFire < 3);
