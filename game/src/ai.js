@@ -42,13 +42,14 @@ const AI = (() => {
         if (!h.pit || h.dead || h.built < 1 || h.occ != null || h.owner !== me.slot || mine.some(e => e.order && e.order.type === 'garrison' && e.order.house === h.id)) continue;
         const free = e => e.type === 'squad' && !e.retreating && e.garrison == null && !e.def.builder && e.order.type !== 'attack' && e.suppState < 2;
         const near = (e, r) => U.dist2(e.x, e.y, h.x, h.y) < r * r;
-        const hmg = mine.filter(e => free(e) && e.def.crewWeapon === 'tripod_mg' && near(e, 45)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
-        // riflemen only when there is something coming: an empty position on a quiet flank is left for a machine gun
+        // machine guns take positions through mgPlan (only one that watches the way in); riflemen man the rest, and only
+        // when there is something coming
         const threat = G.ents.some(o => !o.dead && o.owner === 1 - me.slot && o.type !== 'building' && U.dist2(o.x, o.y, h.x, h.y) < 55 * 55 && FOG.visible(G, me.slot, o));
-        const inf = hmg || !threat ? null : mine.filter(e => free(e) && !e.crew && near(e, 18)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
-        const who = hmg || inf; if (who) SIM.issue(G, [who.id], { type: 'garrison', house: h.id });
+        const inf = !threat ? null : mine.filter(e => free(e) && !e.crew && near(e, 18)).sort((a, b) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(b.x, b.y, h.x, h.y))[0];
+        if (inf) SIM.issue(G, [inf.id], { type: 'garrison', house: h.id });
       }
     }
+    patchGaps(G, me, mine, S);
     if (G.t < FORT.from || (S.fortT || 0) > G.t) return;
     S.fortT = G.t + FORT.every;
     // a position left half dug (its diggers retreated or died): a free builder goes back and finishes it
@@ -67,11 +68,20 @@ const AI = (() => {
     const hq = SIM.hqOf(G, me.slot), foe = SIM.hqOf(G, 1 - me.slot); if (!hq || !foe) return;
     const held = G.map.points.filter(p => p.owner === me.slot && !pits.some(h => U.dist2(h.x, h.y, p.x, p.y) < 20 * 20) && Math.hypot(p.x - hq.x, p.y - hq.y) < 90)
       .sort((a, c) => Math.hypot(a.x - foe.x, a.y - foe.y) - Math.hypot(c.x - foe.x, c.y - foe.y));
+    const gun = D.W[me.side === 'us' ? 'm1919' : 'mg42'], R = gun.rng[2] * .9, arcHalf = gun.arc / 2 * Math.PI / 180;
     for (const p of held) {
-      const face = Math.atan2(foe.y - p.y, foe.x - p.x);
-      for (const off of [0, .6, -.6, 1.1, -1.1]) {
-        const a = face + off, x = p.x + Math.cos(a) * (p.radius + 6), y = p.y + Math.sin(a) * (p.radius + 6);
+      // dig where a machine gun in it would see the enemy's way in; skip points where no spot sees it
+      const route = approach(G, me.slot, p), ahead = Math.atan2(foe.y - p.y, foe.x - p.x);
+      let pick = null;
+      for (const off of [0, .6, -.6, 1.1, -1.1, 1.6, -1.6]) for (const r of [p.radius + 4, p.radius + 7]) {
+        const a = ahead + off, x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r;
         if (SIM.canPit(G, me.slot, id, x, y)) continue;
+        const v = routeView(G, route, x, y, R, arcHalf, false); if (!v || v.watch <= 0) continue;
+        const sc = v.watch - Math.abs(off) * .5;
+        if (!pick || sc > pick.sc) pick = { x, y, face: v.face, sc };
+      }
+      if (pick) {
+        const { x, y, face } = pick;
         SIM.issue(G, [b.id], { type: 'build', what: id, x, y, face });
         // and a sandbag line 4 m in front of it, across the line of fire
         const fx = x + Math.cos(face) * 4.2, fy = y + Math.sin(face) * 4.2, px = -Math.sin(face) * 3, py = Math.cos(face) * 3;
@@ -83,6 +93,31 @@ const AI = (() => {
         return;
       }
     }
+  }
+
+  /* Broken sandbag lines: when it is quiet, an idle builder re-lays the pieces shells and tanks knocked out of our own
+     lines near the points we hold (a gap is debris of ours with no sandbags standing over it). A few pieces a pass. */
+  const PATCH = { every: 15, quiet: 35, nearPoint: 30, max: 3 };
+  function patchGaps(G, me, mine, S) {
+    if ((S.patchT || 0) > G.t) return;
+    S.patchT = G.t + PATCH.every;
+    const b = mine.find(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type === 'idle' && !e.buildQueue.length && !e.fortQueue && G.t - e.lastHit > 8);
+    if (!b) return;
+    const foes = G.ents.filter(e => !e.dead && e.owner === 1 - me.slot && e.type !== 'building');
+    const gaps = [];
+    for (const d of G.map.debris || []) {
+      if (d.kind !== 'sandbags' || d.owner !== me.slot || !d.built || d.patched) continue;
+      if (!G.map.points.some(p => p.owner === me.slot && U.dist2(p.x, p.y, d.x, d.y) < PATCH.nearPoint * PATCH.nearPoint)) continue;
+      if (foes.some(e => U.dist2(e.x, e.y, d.x, d.y) < PATCH.quiet * PATCH.quiet)) continue;
+      if (MAP.coversIn(G.map, d.x, d.y, .45).some(c => c.kind === 'sandbags')) { d.patched = true; continue; }
+      gaps.push(d); if (gaps.length >= PATCH.max) break;
+    }
+    if (!gaps.length) return;
+    gaps.forEach((d, i) => {
+      const h = (d.len || 1) / 2, cx = Math.cos(d.ang) * h, cy = Math.sin(d.ang) * h;
+      SIM.issue(G, [b.id], { type: 'build', what: 'sandbags', x: d.x - cx, y: d.y - cy, x2: d.x + cx, y2: d.y + cy }, i > 0);
+      d.patched = true;
+    });
   }
 
   function spend(G, me, mine, S) {
@@ -259,7 +294,7 @@ const AI = (() => {
      candidate spot near the point (behind cover across that route, a free house beside it, or open ground if nothing
      else) scores for cover, for how much of the route it sees inside its range and arc, and for staying near the point.
      The gun faces the middle of what it covers. */
-  const MG = { search: 16, routeLen: 70, step: 3, chokeR: 8, every: 40 };
+  const MG = { search: 16, routeLen: 70, step: 3, chokeR: 8, every: 40, stay: 6 };
   function approach(G, slot, p) {
     const S = (G.aiRoutes || (G.aiRoutes = {})), key = slot + ':' + p.id, c = S[key];
     if (c && c.t > G.t && c.ver === G.map.version) return c.pts;
@@ -285,6 +320,20 @@ const AI = (() => {
     S[key] = { t: G.t + MG.every, ver: G.map.version, pts };
     return pts;
   }
+  /* how much of the enemy's way in a gun at (x, y) watches: the route samples it can see within R, weighted, and of
+     those the ones inside its arc (a house sees out of every side) */
+  function routeView(G, route, x, y, R, half, allRound) {
+    let sx = 0, sy = 0, sw = 0;
+    const seen = route.filter(q => { const d = Math.hypot(q.x - x, q.y - y); return d < R && d > 3 && MAP.los(G.map, x, y, q.x, q.y); });
+    for (const q of seen) { sx += q.x * q.w; sy += q.y * q.w; sw += q.w; }
+    if (!sw) return null;
+    const face = Math.atan2(sy / sw - y, sx / sw - x);
+    const watch = allRound ? sw : seen.reduce((a, q) => a + (Math.abs(U.angNorm(Math.atan2(q.y - y, q.x - x) - face)) <= half ? q.w : 0), 0);
+    return { watch, face };
+  }
+  /* Candidates: spots behind cover, free farmhouses, free fighting positions (any side's, as in CoH3) and the house or
+     position this gun already holds. A position is only worth it if the gun can see the way in from it: a pit dug on
+     the wrong side of a crest scores nothing for watching and is passed over. */
   function mgPlan(G, me, e, p) {
     const w = SIM.weaponOf(e); if (!w) return null;
     const route = approach(G, me.slot, p); if (!route.length) return null;
@@ -292,23 +341,25 @@ const AI = (() => {
     // the way the enemy comes from: the route a little out from the point
     const mid = route[Math.min(route.length - 1, 6)], toward = Math.atan2(mid.y - p.y, mid.x - p.x);
     const cands = coverSpots(G, p.x, p.y, toward, p.radius + MG.search).map(c => ({ x: c.x, y: c.y, cover: c.cover, kind: 'spot' }));
-    for (const h of G.map.houses) if (!h.pit && !h.dead && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < (p.radius + MG.search) ** 2) cands.push({ x: h.x, y: h.y, cover: 'garrison', kind: 'house', h });
+    for (const h of G.map.houses) {
+      if (h.dead || (h.occ != null && h.occ !== e.id) || h.built < 1 || U.dist2(h.x, h.y, p.x, p.y) >= (p.radius + MG.search) ** 2) continue;
+      cands.push({ x: h.x, y: h.y, cover: 'garrison', kind: h.pit ? 'pit' : 'house', h });
+    }
     cands.push({ x: p.x - Math.cos(toward) * 6, y: p.y - Math.sin(toward) * 6, cover: 'none', kind: 'spot' });
+    // where it is set up now, if near the point: it stays unless somewhere clearly better
+    if (e.crew && e.crew.state === 'deployed' && e.garrison == null && U.dist2(e.crew.x, e.crew.y, p.x, p.y) < (p.radius + MG.search) ** 2) {
+      const sc = COMBAT.squadCover(G, e);
+      cands.push({ x: e.crew.x, y: e.crew.y, cover: sc, kind: 'here' });
+    }
     const nav = MAP.navGrids(G.map).inf;
     let best = null, bs = -1e9;
     for (const c of cands) {
       if (c.kind === 'spot' && !MAP.walkable(nav, G.map, c.x, c.y)) continue;
-      // a centre of the route it can see from here, then how much of it falls inside the arc round that
-      let sx = 0, sy = 0, sw = 0;
-      const seen = route.filter(q => { const d = Math.hypot(q.x - c.x, q.y - c.y); return d < R && d > 3 && MAP.los(G.map, c.x, c.y, q.x, q.y); });
-      for (const q of seen) { sx += q.x * q.w; sy += q.y * q.w; sw += q.w; }
-      if (!sw) continue;
-      const face = Math.atan2(sy / sw - c.y, sx / sw - c.x);
-      const watch = c.kind === 'house' ? sw : seen.reduce((a, q) => a + (Math.abs(U.angNorm(Math.atan2(q.y - c.y, q.x - c.x) - face)) <= half ? q.w : 0), 0);
+      const v = routeView(G, route, c.x, c.y, R, half, c.kind === 'house'); if (!v) continue;
       const cov = c.cover === 'heavy' || c.cover === 'garrison' ? 9 : c.cover === 'light' ? 6 : 0;
       const far = Math.max(0, Math.hypot(c.x - p.x, c.y - p.y) - p.radius - 4);
-      const score = watch * 1.4 + cov - far * .8;
-      if (score > bs) { bs = score; best = { ...c, face }; }
+      const score = v.watch * 1.4 + cov - far * .8 + ((c.h && c.h.id === e.garrison) || c.kind === 'here' ? MG.stay : 0);
+      if (score > bs) { bs = score; best = { ...c, face: v.face, score }; }
     }
     return best;
   }
@@ -404,6 +455,11 @@ const AI = (() => {
             SIM.issue(G, [e.id], { type: 'setup', heading: face }); continue;
           }
         }
+      }
+      // a set-up machine gun with enemy infantry in its reach keeps firing: no new orders move it off its gun
+      if (e.crew && e.crew.state !== 'packed' && COMBAT.isMg(e) && e.garrison == null) {
+        const cw = SIM.weaponOf(e);
+        if (visibleEnemies.some(o => o.type === 'squad' && !o.retreating && U.dist2(o.x, o.y, e.crew.x, e.crew.y) < (cw.rng[2] + 5) ** 2)) continue;
       }
       // grenades at enemies in cover
       if (e.type === 'squad' && e.def.abilities && (me.res.mu > 40 || e.crew)) {   // the HE barrage is free
@@ -512,18 +568,15 @@ const AI = (() => {
       const toward = enemyHq ? Math.atan2(enemyHq.y - p.y, enemyHq.x - p.x) : 0;
       let tx = p.x + G.rng.range(-4, 4), ty = p.y + G.rng.range(-4, 4);
       if (e.crew) { tx = p.x - Math.cos(toward) * 8; ty = p.y - Math.sin(toward) * 8; }
-      // a machine-gun team mans a free fighting position by the point (CoH3: HMGs garrison them)
-      if (e.crew && e.def.crewWeapon === 'tripod_mg' && e.garrison == null) {
-        const h = G.map.houses.find(h => h.pit && !h.dead && h.built >= 1 && h.occ == null && U.dist2(h.x, h.y, p.x, p.y) < 22 * 22);
-        if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
-      }
-      if (e.garrison != null && G.map.houses[e.garrison] && G.map.houses[e.garrison].pit && U.dist2(e.x, e.y, p.x, p.y) < 25 * 25) continue;   // already holding it from a position
-      // a machine gun: behind cover (or in a house) by the point, aimed down the enemy's way in
+      if (!(e.crew && e.def.crewWeapon === 'tripod_mg') && e.garrison != null && G.map.houses[e.garrison] && G.map.houses[e.garrison].pit && U.dist2(e.x, e.y, p.x, p.y) < 25 * 25) continue;   // already holding it from a position
+      // a machine gun: behind cover, in a house or in a fighting position by the point, whichever watches most of the
+      // enemy's way in (a position or house it already holds gets a bonus, so it doesn't hop about)
       if (e.crew && e.def.crewWeapon === 'tripod_mg') {
-        if (e.garrison != null && U.dist2(e.x, e.y, p.x, p.y) < 25 * 25) continue;
         const plan = mgPlan(G, me, e, p);
+        if (plan && plan.h && plan.h.id === e.garrison) continue;
+        if (plan && plan.kind === 'here') { if (Math.abs(U.angNorm(plan.face - e.crew.heading)) > .5) SIM.issue(G, [e.id], { type: 'setup', heading: plan.face }); continue; }
         if (plan) {
-          if (plan.kind === 'house') { SIM.issue(G, [e.id], { type: 'garrison', house: plan.h.id }); continue; }
+          if (plan.h) { SIM.issue(G, [e.id], { type: 'garrison', house: plan.h.id }); continue; }
           if (U.dist2(plan.x, plan.y, e.crew.state !== 'packed' ? e.crew.x : e.x, e.crew.state !== 'packed' ? e.crew.y : e.y) < 2.5 * 2.5) { if (e.crew.state !== 'packed' && Math.abs(U.angNorm(plan.face - e.crew.heading)) > .5) SIM.issue(G, [e.id], { type: 'setup', heading: plan.face }); continue; }
           SIM.issue(G, [e.id], { type: 'move', x: plan.x, y: plan.y, face: plan.face }); continue;
         }

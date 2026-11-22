@@ -263,7 +263,9 @@ const DATA = (() => {
     captureTime: 20, vpStart: 500, vpDrainPerDiff: .2,
   };
 
-  const SUPP = { suppressed: .2, pinned: .65, recover: .07, cap: 1 };
+  /* Suppression thresholds as in the CoH series (suppressed .2, pinned .6 to .65). It only recovers once the squad has
+     not been shot at for recoverDelay seconds (series rule; the delay itself is a stand-in). */
+  const SUPP = { suppressed: .2, pinned: .65, recover: .07, recoverDelay: 1.5, cap: 1, standIn: 'recover, recoverDelay' };
 
   return { CLASSES, W, SQUADS, VEHICLES, BUILDINGS, DEFENCES, ABILITIES, FACTIONS, COVER, ECON, SUPP };
 })();
