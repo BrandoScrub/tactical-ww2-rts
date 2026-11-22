@@ -2,7 +2,9 @@
 Writes styles/ww2/decals/*.png (national markings, numbers, glass, grilles: stretched over one face each) and
 styles/ww2/tiles/de_camo.jpg (the German three-colour scheme: the painted de_hull tile with sprayed olive-green and
 red-brown bands). Sources: US Army AR 850-5 (white star, sizes by surface); German 1943 order (dark yellow base,
-olive green and red-brown applied by the unit, soft sprayed edges); Balkenkreuz and turret numbers as on 1944 vehicles."""
+olive green and red-brown applied by the unit, soft sprayed edges); Balkenkreuz and turret numbers as on 1944 vehicles.
+Aircraft (air()): the US star-and-bar of August 1943; Luftwaffe Mediterranean sand with olive-green blotches (tiles
+de_air, and de_air_corr on corrugated sheet); cabin window rows; airship lettering; US camouflage parachute cloth."""
 import os, math
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -108,6 +110,60 @@ def camo(n=1024):
     return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), 'RGB')
 
 
+# ---------------------------------------------------------------- aircraft and parachutes (models/air_finish.py, parachutes.py)
+BLUE = (38, 52, 84)
+
+
+def star_and_bar(h=96):
+    """The US national insignia of August 1943 on: white star on a blue disc, a white bar each side, blue border."""
+    R = h * S * 0.44; w = int(R * 4.6); im = Image.new('RGBA', (w, h * S), (0, 0, 0, 0)); d = ImageDraw.Draw(im); cx, cy = w / 2, h * S / 2; b = R * 0.12
+    d.rectangle([cx - 2 * R - b, cy - R * 0.25 - b, cx + 2 * R + b, cy + R * 0.25 + b], fill=BLUE + (255,))
+    d.ellipse([cx - R - b, cy - R - b, cx + R + b, cy + R + b], fill=BLUE + (255,))
+    d.rectangle([cx - 2 * R, cy - R * 0.25, cx + 2 * R, cy + R * 0.25], fill=WHITE + (255,))
+    d.ellipse([cx - R, cy - R, cx + R, cy + R], fill=BLUE + (255,))
+    pts = [(cx + (R if k % 2 == 0 else R * 0.382) * math.sin(k * math.pi / 5), cy - (R if k % 2 == 0 else R * 0.382) * math.cos(k * math.pi / 5)) for k in range(10)]
+    d.polygon(pts, fill=WHITE + (255,))
+    return worn(im.resize((w // S, h), Image.LANCZOS), 7, 0.05)
+
+
+def windows(n, w=40, h=34, gap=26, frame=(40, 42, 40)):
+    """A row of n cabin windows on clear: dark panes with a glint, as the glass decal."""
+    im = Image.new('RGBA', (n * (w + gap), h), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    for k in range(n):
+        x = k * (w + gap) + gap // 2
+        d.rounded_rectangle([x, 0, x + w - 1, h - 1], 6, fill=(58, 70, 72, 255), outline=frame + (255,), width=2)
+        d.polygon([(x + w * 0.2, h - 3), (x + w * 0.45, 3), (x + w * 0.62, 3), (x + w * 0.37, h - 3)], fill=(104, 122, 122, 255))
+    return im
+
+
+def mottle(n=1024, base=(182, 158, 110), blot=(98, 104, 68), cover=(0.50, 0.60), seed=31, cells=(6, 13)):
+    """A flat paint with soft sprayed blotches of a second colour (Luftwaffe Mediterranean scheme; parachute camouflage)."""
+    f = periodic(n, cells[0], seed) * 0.55 + periodic(n, cells[1], seed + 1) * 0.45
+    k = np.clip((f - cover[0]) / 0.04, 0, 1) * np.clip((cover[1] + 0.2 - f) / 0.04, 0, 1)
+    g = 1 + (periodic(n, 64, seed + 2) - 0.5) * 0.06
+    out = (np.array(base, float) * (1 - k[..., None]) + np.array(blot, float) * k[..., None]) * g[..., None]
+    return np.clip(out, 0, 255)
+
+
+def corrugated(a, ridges=16):
+    """The same paint on Junkers corrugated sheet: light and shade in bands across the tile's height (models put the
+    bands along the airframe)."""
+    n = a.shape[0]; v = np.sin(np.arange(n) / n * 2 * math.pi * ridges)
+    return np.clip(a * (1 + 0.16 * v)[:, None, None], 0, 255)
+
+
+def air():
+    """Only the aircraft and parachute markings and paints: python3 tools/make_markings.py air"""
+    os.makedirs(DEC, exist_ok=True)
+    out = {'us_air_star': star_and_bar(), 'cabin_windows_7': windows(7), 'cabin_windows_5': windows(5),
+           'us_navy': text('U.S. NAVY', BLACK, h=64), 'k_number': text('K-109', BLACK, h=64), 'us_tail_serial': text('276541', (204, 170, 62), h=32)}
+    for k, im in out.items(): im.save(os.path.join(DEC, k + '.png'))
+    sand = mottle(cells=(4, 9))
+    for name, arr in (('de_air', sand), ('de_air_corr', corrugated(mottle(cover=(2.0, 3.0)))),              # plain sand: blotches do not survive a 2.3 m tile
+                      ('us_chute', mottle(base=(98, 110, 70), blot=(62, 76, 52), cover=(0.46, 0.60), seed=47))):
+        Image.fromarray(arr.astype(np.uint8), 'RGB').save(os.path.join(TILES, name + '.jpg'), quality=92)
+
+
 def main():
     os.makedirs(DEC, exist_ok=True)
     out = {'us_star': star(), 'us_star_ring': star(128, ring=True), 'de_cross': cross(), 'glass': glass(), 'lens': lens(),
@@ -118,7 +174,9 @@ def main():
     for num in ('211', '324', '131', '412', '233', '102'): out['de_num_' + num] = text(num, RED, WHITE, h=56)
     for k, im in out.items(): im.save(os.path.join(DEC, k + '.png'))
     camo().save(os.path.join(TILES, 'de_camo.jpg'), quality=92)
+    air()
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    air() if 'air' in sys.argv[1:] else main()

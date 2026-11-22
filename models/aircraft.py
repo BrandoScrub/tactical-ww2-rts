@@ -1,13 +1,25 @@
-"""Aircraft and parachutes for air abilities (strafing runs, bombing runs, recon, paradrops, supply drops): grey
-blockouts, one artkit.machine.Machine each with check() empty. Briefs follow artkit/DESIGN_METHOD.md.
+"""Aircraft for air abilities (strafing and rocket runs, bombing runs, recon, paradrops, supply drops): the blockouts,
+one artkit.machine.Machine each with check() empty. Briefs follow artkit/DESIGN_METHOD.md. The second pass (paint,
+markings, guns, windows) is models/air_finish.py; the parachutes are models/parachutes.py.
 
 Frame (kit.py): x tail (0) to nose, y across (+y = the aircraft's left), z up; metres in, 55 units a metre out. Things
-that fly have no ground (Machine(ground=None)). Aircraft are modelled in flight: gear up where it retracts, props as
-blades on a spinner that turns on the thrust line (the game blurs or spins them). Parachutes hang from z = 0 at the
-jumper's boots, canopy above.
+that fly have no ground (Machine(ground=None)). Aircraft are modelled in flight: gear up where it retracts, propellers
+as blades on a spinner that turns on the thrust line (pose={'prop_spinner': degrees} turns one for a frame).
 
 Real sizes throughout, so a P-47 is about 270 px across at the units' export scale and the blimp about 1700 px long:
 how big the game draws them is an open choice (CoH draws its aircraft smaller than true scale), made at export.
+
+Corrected after review (2026-11-22), each checked against a source:
+  Bf 109 G   the tailplane struts are gone: only the E and earlier had them; the F and G tailplane is unbraced.
+  Ju 87 D    the deep chin radiator was the B's. The D has a small oil cooler under the nose and its two coolant
+             radiators under the inner wings. In Italy in 1944 the D flew with the night ground-attack units.
+  P-47       the rear fuselage was drawn as thin as a 109's; it is deep all the way to the tail. Rocket tubes are
+             three tubes, not a box.
+  B-25       the tailplane is flat (it was given dihedral).
+  Ju 52      slab-sided fuselage (it was an oval tube); wing engines and gear moved in beside the fuselage.
+  B-25, Ju 87  fuselages squared off: both are flat-sided.
+Dimensions are overall figures (span, length, propeller) from the types' published data; station shapes between
+them are from general knowledge of the aircraft, not traced from drawings.
 """
 import math
 import numpy as np
@@ -19,14 +31,22 @@ X_AXIS = (1, 0, 0)
 
 
 # ---------------------------------------------------------------- builders
-def _ellipse(x, hw, zb, zt, n=16, y=0.0):
-    zc, h = (zb + zt) / 2, (zt - zb) / 2
-    return [(x, y + hw * math.cos(2 * math.pi * k / n), zc + h * math.sin(2 * math.pi * k / n)) for k in range(n)]
+def _ellipse(x, hw, zb, zt, n=16, y=0.0, box=2.0):
+    zc, h = (zb + zt) / 2, (zt - zb) / 2; e = 2.0 / box
+    f = lambda v: math.copysign(abs(v) ** e, v)
+    return [(x, y + hw * f(math.cos(2 * math.pi * k / n)), zc + h * f(math.sin(2 * math.pi * k / n))) for k in range(n)]
 
 
-def body(stations, mat='hull', y=0.0, smooth=True):
-    """A convex streamlined body through stations [(x, half-width, bottom z, top z)]: fuselage, nacelle, spat."""
-    return solid([p for s in stations for p in _ellipse(*s, y=y)], mat, smooth=smooth)
+def body(stations, mat='hull', y=0.0, smooth=True, box=2.0):
+    """A convex streamlined body through stations [(x, half-width, bottom z, top z)]: fuselage, nacelle, spat.
+    box: 2 gives oval sections; higher squares them off (3.5: flat sides and rounded corners)."""
+    return solid([p for s in stations for p in _ellipse(*s, y=y, box=box)], mat, smooth=smooth)
+
+
+def fuselage(m, stations, why, smooth=True, box=2.0):
+    """The root part, and its stations and wing sections kept on the machine (m.ref) for the finishing pass."""
+    m.ref = {'fuselage': stations, 'box': box}
+    m.add('fuselage', body(stations, smooth=smooth, box=box), why)
 
 
 def _section(y, le, te, z, t):
@@ -40,6 +60,7 @@ def surface(m, name, sections, on, why, mat='hull', mirror=True):
     """A wing or tailplane: sections [(y, le, te, z, t)] root to tip, each pair of neighbours one convex panel,
     panel k mounted on panel k-1 (the root panel on `on`). Both sides unless mirror=False. Returns the tip panel names."""
     tips = []
+    if hasattr(m, 'ref'): m.ref[name] = sections
     for sd, s in ((1, 'l'), (-1, 'r')) if mirror else ((1, ''),):
         prev = on
         for k, (a, b) in enumerate(zip(sections[:-1], sections[1:])):
@@ -124,8 +145,8 @@ def p47():
               tailplane and fin; rocket tubes as short dark bars under the wings
     """
     m = Machine('US fighter-bomber (P-47D Thunderbolt)', ground=None)
-    m.add('fuselage', body([(0.0, 0.06, 0.05, 0.30), (0.5, 0.14, -0.12, 0.38), (3.0, 0.34, -0.45, 0.55), (6.4, 0.58, -0.82, 0.72),
-                            (8.4, 0.70, -0.95, 0.78), (9.9, 0.74, -0.95, 0.74)]),
+    fuselage(m, [(0.0, 0.07, -0.10, 0.42), (0.6, 0.20, -0.32, 0.52), (3.0, 0.44, -0.66, 0.62), (6.4, 0.62, -0.88, 0.74),
+                 (8.4, 0.70, -0.95, 0.78), (9.9, 0.74, -0.95, 0.74)],
           'deep oval monocoque: engine, pilot, and the turbo ducting under them (the Jug\'s belly)')
     radial_cowl(m, 'cowl', 9.85, 10.95, 0, -0.1, 0.78, 'fuselage', 'big round cowl over the R-2800 radial: the blunt nose that IS this aeroplane')
     m.add('chin', body([(9.2, 0.42, -1.05, -0.55), (10.5, 0.44, -1.06, -0.55), (10.9, 0.34, -0.95, -0.6)]),
@@ -138,13 +159,15 @@ def p47():
             'fuselage', 'low semi-elliptical wing, 4 degrees dihedral: guns, fuel and the main gear (retracted) live in it')
     for sd, s in ((1, 'l'), (-1, 'r')):
         y = sd * 3.9
-        m.add(f'rockets_{s}', solid([(x, y + dy, z) for x in (6.2, 8.5) for dy in (-0.22, 0.22) for z in (-0.82, -0.64)], 'steel'),
-              'triple M10 rocket tubes under the wing: the rocket-strike load, three tubes bundled', on=f'rocket_pylon_{s}')
-        m.add(f'rocket_pylon_{s}', slab(6.9, 7.6, y - 0.04, y + 0.04, -0.66, -0.40, 'steel'),
-              'pylon: hangs the tube bundle from the wing spar', on=f'wing_{s}1', small_ok=True)
-    surface(m, 'tailplane', [(0.10, 1.55, 0.25, 0.20, 0.16), (2.3, 1.15, 0.45, 0.20, 0.08)], 'fuselage',
+        m.add(f'rocket_pylon_{s}', slab(6.9, 7.6, y - 0.05, y + 0.05, -0.62, -0.40, 'steel'),
+              'pylon: hangs the tube cluster from the wing spar', on=f'wing_{s}1', small_ok=True)
+        for k, (dy, z) in enumerate(((0.0, -0.70), (-0.09, -0.85), (0.09, -0.85))):
+            m.add(f'rocket_tube_{s}{k}', rod((5.7, y + dy, z), (8.7, y + dy, z), 0.09, 'steel', seg=8),
+                  'M10 rocket tube, 3 m: one of the cluster of three that is the rocket-strike load',
+                  on=f'rocket_pylon_{s}' if k == 0 else f'rocket_tube_{s}0', small_ok=True)
+    surface(m, 'tailplane', [(0.10, 1.55, 0.25, 0.22, 0.16), (2.3, 1.15, 0.45, 0.22, 0.08)], 'fuselage',
             'tailplane and elevator: pitch, so it can dive and pull out')
-    fin(m, 'fin', [(0.30, 1.85, 0.0, 0.16), (1.00, 1.30, 0.05, 0.12), (1.75, 0.85, 0.25, 0.08)], 'fuselage',
+    fin(m, 'fin', [(0.40, 1.85, 0.0, 0.16), (1.05, 1.30, 0.05, 0.12), (1.80, 0.85, 0.25, 0.08)], 'fuselage',
         'fin and rudder: yaw; with the tailplane, the cross at the back that says aeroplane')
     return m
 
@@ -156,15 +179,15 @@ def bf109():
     gameplay: an ability call-in; must read as German, small, slim and fast, set against the fat P-47
     power:    inverted V12 (DB 605) in a slim pointed nose; coolant radiators under each wing, oil cooler under the chin
     moves:    3-blade 3 m propeller; gear retracts outward into the wing
-    built:    small stressed-skin fuselage; straight-tapered wing with rounded tips; strut-braced tailplane
+    built:    small stressed-skin fuselage; straight-tapered wing with rounded tips; unbraced tailplane half way up the fin
     serviced: engine cowls hinge up; framed canopy hinges to the right
     references: Bf 109 G-6 (Messerschmitt drawings; JG 53 and JG 77 in Italy); CoH series Luftwaffe fighters
     read_at_play_size: a thin dart: pointed spinner, narrow body, short straight wings with two dark radiators
               under them, framed canopy, rounded fin
     """
     m = Machine('German fighter (Bf 109 G-6)', ground=None)
-    m.add('fuselage', body([(0.0, 0.05, 0.08, 0.28), (0.5, 0.11, -0.10, 0.36), (3.4, 0.32, -0.42, 0.46), (5.8, 0.45, -0.55, 0.56),
-                            (7.2, 0.44, -0.58, 0.46), (8.55, 0.38, -0.50, 0.30)]),
+    fuselage(m, [(0.0, 0.05, 0.08, 0.28), (0.5, 0.11, -0.10, 0.36), (3.4, 0.32, -0.42, 0.46), (5.8, 0.45, -0.55, 0.56),
+                 (7.2, 0.44, -0.58, 0.46), (8.55, 0.38, -0.50, 0.30)],
           'slim monocoque round the pilot; the long nose holds the inverted V12 (its narrow top is why the nose tapers)')
     m.add('oil_cooler', body([(7.0, 0.20, -0.82, -0.45), (8.2, 0.22, -0.78, -0.40)]),
           'oil cooler under the chin: the small belly scoop of the G', on='fuselage')
@@ -180,10 +203,7 @@ def bf109():
               'coolant radiator under the wing: a liquid-cooled engine has to dump heat; two dark boxes that mark the 109',
               on='wing_l0' if sd > 0 else 'wing_r0')
     surface(m, 'tailplane', [(0.04, 1.05, 0.15, 0.42, 0.10), (1.6, 0.85, 0.30, 0.42, 0.06)], 'fin0',
-            'tailplane set high on the fin, braced by a strut each side')
-    for sd, s in ((1, 'l'), (-1, 'r')):
-        m.add(f'tail_strut_{s}', rod((0.75, sd * 0.10, 0.05), (0.70, sd * 0.85, 0.40), 0.03), 'tailplane strut down to the fuselage: the Bf 109 tail',
-              on='fuselage', contact=[f'tailplane_{s}0'], small_ok=True)
+            'tailplane half way up the fin, unbraced (the struts went with the E)')
     fin(m, 'fin', [(0.25, 1.35, 0.0, 0.14), (0.85, 1.05, 0.02, 0.10), (1.45, 0.65, 0.18, 0.06)], 'fuselage',
         'rounded fin and rudder')
     return m
@@ -196,22 +216,22 @@ def ju87():
     does:     dives near-vertically onto a target and releases one heavy bomb; strafes with wing guns
     gameplay: an ability call-in; the dive is the event, so it must read as German, angular, bent-winged and
               carrying a bomb, from straight above and steeply below
-    power:    inverted V12 (Jumo 211) in the nose, a big radiator bath under it
+    power:    inverted V12 (Jumo 211 J) in the nose; a small oil cooler under it, the two coolant radiators under the
+              inner wings (the D's cleaner nose: the B carried one big radiator under the chin)
     moves:    3-blade 3.4 m propeller; FIXED spatted main gear (no retraction); bomb swung clear of the prop on a
               crutch under the belly; dive brakes under the outer wings
     built:    angular all-metal fuselage; inverted gull wing (inner panels down, outer panels up), so the short
               fixed gear sits at the lowest point, the bend
     serviced: long greenhouse canopy, pilot in front, rear gunner facing back
-    references: Ju 87 D-1/D-3 (Junkers drawings; StG 3 in Italy); CoH3 Stuka; Battle of Britain-era photos for the
-              gull wing seen head on
-    read_at_play_size: a W of a wing with two big boots hanging from its bends, a long canopy, a deep chin, a bomb
+    references: Ju 87 D-3 and D-5 (the night ground-attack units flew them in Italy in 1944); CoH3's Stuka call-ins
+    read_at_play_size: a W of a wing with two big boots hanging from its bends, a long canopy, a bomb
     """
     m = Machine('German dive bomber (Ju 87 D Stuka)', ground=None)
-    m.add('fuselage', body([(0.0, 0.07, -0.05, 0.36), (2.0, 0.32, -0.40, 0.48), (5.0, 0.52, -0.68, 0.56), (8.0, 0.60, -0.80, 0.60),
-                            (10.1, 0.56, -0.72, 0.50), (10.9, 0.42, -0.50, 0.30)], smooth=False),
-          'angular fuselage: two crew in the middle, engine in the nose; flat-sided (built, not cast)')
-    m.add('radiator', body([(9.2, 0.40, -1.25, -0.55), (10.4, 0.44, -1.30, -0.50), (10.85, 0.36, -1.0, -0.45)], smooth=False),
-          'deep radiator bath under the nose: the Stuka\'s heavy jaw', on='fuselage')
+    fuselage(m, [(0.0, 0.07, -0.05, 0.36), (2.0, 0.32, -0.40, 0.48), (5.0, 0.52, -0.68, 0.56), (8.0, 0.60, -0.80, 0.60),
+                 (10.1, 0.56, -0.72, 0.50), (10.9, 0.42, -0.50, 0.30)],
+          'angular fuselage: two crew in the middle, engine in the nose; flat-sided (built, not cast)', smooth=False, box=2.7)
+    m.add('oil_cooler', body([(9.5, 0.26, -0.98, -0.60), (10.5, 0.30, -1.0, -0.55), (10.85, 0.24, -0.86, -0.48)], smooth=False),
+          'oil cooler under the nose: a shallow chin (the coolant radiators are under the wings)', on='fuselage')
     prop(m, 'prop', 10.9, 0, -0.12, 1.7, 3, 'fuselage', spinner=0.30, length=0.55, chord=0.28, why='3-blade Junkers propeller, 3.4 m')
     canopy(m, 'canopy', 5.2, 8.1, 0.46, 0.50, 1.18, 'fuselage', framed=True, why='long greenhouse over pilot and rear gunner, back to back')
     head(m, 'pilot', 7.3, 0, 0.95, 'canopy')
@@ -226,8 +246,11 @@ def ju87():
         y = sd * bend
         m.add(f'gear_leg_{s}', solid([(x, y + dy, z) for x in (7.85, 8.25) for dy in (-0.12, 0.12) for z in (zb - 1.1, zb + 0.05)]),
               'fixed gear leg in its fairing from the wing bend: it never retracts', on=f'wing_{s}0', contact=[f'wing_{s}1'])
-        m.add(f'spat_{s}', body([(7.2, 0.06, zb - 1.55, zb - 1.35, ), (7.6, 0.22, zb - 1.85, zb - 1.05), (8.3, 0.25, zb - 1.90, zb - 1.00), (8.8, 0.10, zb - 1.55, zb - 1.25)], y=y),
+        m.add(f'spat_{s}', body([(7.2, 0.06, zb - 1.55, zb - 1.35), (7.6, 0.22, zb - 1.85, zb - 1.05), (8.3, 0.25, zb - 1.90, zb - 1.00), (8.8, 0.10, zb - 1.55, zb - 1.25)], y=y),
               'wheel spat over the main wheel: the Stuka\'s boots, the shape everyone knows', on=f'gear_leg_{s}')
+        y0, y1 = sorted((sd * 1.25, sd * 2.05)); zi = -0.40 - 1.15 * math.tan(math.radians(12))
+        m.add(f'wing_radiator_{s}', solid([(x, yy, z) for x in (6.3, 7.3) for yy in (y0, y1) for z in (zi - 0.48, zi - 0.10)]),
+              'coolant radiator under the inner wing, by the trailing edge: one each side on the D', on=f'wing_{s}0')
         y0, y1 = sorted((sd * 3.0, sd * 4.6)); zo = zb + 1.2 * math.tan(math.radians(8))
         m.add(f'dive_brake_{s}', slab(7.35, 7.6, y0, y1, zo - 0.38, zo - 0.08, 'steel'),
               'dive brake slats under the outer wing: hold the dive speed down', on=f'wing_{s}1', small_ok=True)
@@ -239,7 +262,7 @@ def ju87():
           'bomb tail fins: keep it straight after release', on='bomb')
     surface(m, 'tailplane', [(0.10, 1.75, 0.35, 0.30, 0.14), (2.4, 1.45, 0.55, 0.30, 0.08)], 'fuselage', 'tailplane, braced')
     for sd, s in ((1, 'l'), (-1, 'r')):
-        m.add(f'tail_strut_{s}', rod((1.2, sd * 0.12, -0.15), (1.15, sd * 1.25, 0.26), 0.03), 'tailplane strut: braced tail', on='fuselage',
+        m.add(f'tail_strut_{s}', rod((1.2, sd * 0.12, -0.15), (1.15, sd * 1.25, 0.26), 0.03), 'tailplane strut: the Stuka kept its braced tail to the end', on='fuselage',
               contact=[f'tailplane_{s}0'], small_ok=True)
     fin(m, 'fin', [(0.30, 1.75, 0.0, 0.16), (1.0, 1.35, 0.05, 0.12), (1.75, 0.95, 0.30, 0.08)], 'fuselage', 'fin and rudder, squarish')
     return m
@@ -260,9 +283,9 @@ def b25():
     read_at_play_size: a long body, two big engines on a bent wing, glass nose, a turret bump, and an H-shaped tail
     """
     m = Machine('US medium bomber (B-25J Mitchell)', ground=None)
-    m.add('fuselage', body([(0.0, 0.30, -0.15, 0.45), (1.0, 0.42, -0.35, 0.58), (4.0, 0.65, -0.75, 0.72), (9.0, 0.78, -1.0, 0.85),
-                            (13.2, 0.78, -1.0, 0.85), (14.9, 0.70, -0.88, 0.66)], smooth=False),
-          'slab-sided fuselage: crew front and back, the bomb bay in the middle under the wing')
+    fuselage(m, [(0.0, 0.30, -0.15, 0.45), (1.0, 0.42, -0.35, 0.58), (4.0, 0.65, -0.75, 0.72), (9.0, 0.78, -1.0, 0.85),
+                 (13.2, 0.78, -1.0, 0.85), (14.9, 0.70, -0.88, 0.66)],
+          'slab-sided fuselage: crew front and back, the bomb bay in the middle under the wing', smooth=False, box=3.2)
     m.add('nose_glass', body([(14.85, 0.68, -0.86, 0.62), (15.6, 0.50, -0.65, 0.42), (16.1, 0.18, -0.30, 0.10)], 'glass'),
           'glazed nose: the bombardier aims from here', on='fuselage')
     canopy(m, 'canopy', 11.6, 13.4, 0.72, 0.70, 1.40, 'fuselage', framed=True, why='stepped cockpit, pilot and co-pilot side by side')
@@ -283,10 +306,10 @@ def b25():
               'engine nacelle: holds the radial in front and the main gear behind it, so it runs long past the wing', on=f'wing_{s}0', contact=[f'wing_{s}1'])
         radial_cowl(m, f'cowl_{s}', 11.9, 12.75, y, zc, 0.80, f'nacelle_{s}')
         prop(m, f'prop_{s}', 12.75, y, zc, 1.9, 3, f'cowl_{s}', spinner=0.26, length=0.45, chord=0.30, why='3-blade Hamilton propeller, 3.8 m')
-    surface(m, 'tailplane', [(0.20, 2.35, 0.25, 0.48, 0.20), (3.35, 2.05, 0.45, 0.62, 0.12)], 'fuselage',
-            'tailplane with a little dihedral, carrying a fin at each tip')
+    surface(m, 'tailplane', [(0.20, 2.35, 0.25, 0.52, 0.20), (3.35, 2.05, 0.45, 0.52, 0.12)], 'fuselage',
+            'flat tailplane carrying a fin at each tip')
     for sd, s in ((1, 'l'), (-1, 'r')):
-        fin(m, f'fin_{s}', [(-0.35, 2.15, 0.10, 0.18), (0.62, 2.20, 0.10, 0.16), (1.90, 1.95, 0.30, 0.12)], f'tailplane_{s}0',
+        fin(m, f'fin_{s}', [(-0.45, 2.15, 0.10, 0.18), (0.52, 2.20, 0.10, 0.16), (1.80, 1.95, 0.30, 0.12)], f'tailplane_{s}0',
             'twin fins on the tailplane tips: the H tail that names the Mitchell', y=sd * 3.38)
         m.parts[f'fin_{s}1'].contact = (f'tailplane_{s}0',)
     return m
@@ -298,7 +321,7 @@ STATIONS_C47 = [(0.0, 0.12, 0.30, 0.80), (0.5, 0.25, 0.10, 0.85), (4.0, 0.82, -0
 STATIONS_JU52 = [(0.0, 0.14, 0.40, 0.85), (2.5, 0.48, -0.40, 0.98), (8.5, 0.95, -1.10, 1.15), (15.5, 0.95, -1.10, 1.15), (17.6, 0.72, -0.80, 0.70)]
 
 
-def side_panel(stations, x0, x1, z0, z1, out=0.07, mat='dark'):
+def side_panel(stations, x0, x1, z0, z1, out=0.07, mat='dark', box=2.0):
     """A thin panel lying on the left side of a body() (a door, a hatch): x0..x1, z0..z1, standing `out` proud."""
     xs, st = [s_[0] for s_ in stations], np.array(stations, float)
     pts = []
@@ -306,7 +329,7 @@ def side_panel(stations, x0, x1, z0, z1, out=0.07, mat='dark'):
         hw, zb, zt = (np.interp(x, xs, st[:, k]) for k in (1, 2, 3))
         zc, h = (zb + zt) / 2, (zt - zb) / 2
         for z in (z0, (z0 + z1) / 2, z1):
-            y = hw * math.sqrt(max(0.0, 1 - ((z - zc) / h) ** 2))
+            y = hw * max(0.0, 1 - abs((z - zc) / h) ** box) ** (1 / box)
             pts += [(x, y - 0.08, z), (x, y + out, z)]
     return solid(pts, mat)
 
@@ -326,7 +349,7 @@ def c47():
     read_at_play_size: a long round body on a long straight-backed wing with two engines, single fin, dark door
     """
     m = Machine('US transport (C-47 Skytrain)', ground=None)
-    m.add('fuselage', body(STATIONS_C47),
+    fuselage(m, STATIONS_C47,
           'round fuselage: a long tube of cabin for the stick of paratroopers or cargo')
     canopy(m, 'windscreen', 16.9, 18.4, 0.85, 0.90, 1.42, 'fuselage', framed=True, why='flight deck windscreen: marks the nose end')
     head(m, 'pilot', 17.5, 0.45, 1.18, 'windscreen')
@@ -348,7 +371,6 @@ def c47():
 
 
 WING_JU52 = np.array([(0.6, 14.9, 10.4, -1.00, 0.85), (4.6, 14.6, 10.5, -0.86, 0.75), (13.0, 12.8, 10.9, -0.55, 0.32), (14.6, 12.2, 11.1, -0.48, 0.16)])
-WING_JU52 = WING_JU52[:, [0, 1, 2, 3, 4]]
 
 
 def ju52():
@@ -367,13 +389,13 @@ def ju52():
               back edge, a boxy body, spindly fixed gear
     """
     m = Machine('German transport (Ju 52/3m)', ground=None)
-    m.add('fuselage', body(STATIONS_JU52, smooth=False),
-          'boxy fuselage, flat sides: the cabin (built of corrugated sheet, not a round tube)')
+    fuselage(m, STATIONS_JU52,
+          'boxy fuselage, flat sides: the cabin (built of corrugated sheet, not a round tube)', smooth=False, box=3.6)
     radial_cowl(m, 'cowl_c', 17.55, 18.45, 0, -0.10, 0.72, 'fuselage', 'nose engine in a ring cowl: the third engine')
     prop(m, 'prop_c', 18.45, 0, -0.10, 1.4, 3, 'cowl_c', spinner=0.22, length=0.35, chord=0.26, why='3-blade propeller, 2.8 m')
     canopy(m, 'windscreen', 15.4, 17.0, 0.80, 0.95, 1.55, 'fuselage', framed=True, why='cockpit glazing, high and stepped: marks the nose end')
     head(m, 'pilot', 16.2, 0.4, 1.32, 'windscreen')
-    m.add('jump_door', side_panel(STATIONS_JU52, 4.4, 5.6, -0.55, 0.85),
+    m.add('jump_door', side_panel(STATIONS_JU52, 4.4, 5.6, -0.55, 0.85, box=3.6),
           'cabin door, left rear, open for the jump: the human-scale cue', on='fuselage')
     surface(m, 'wing', [tuple(w) for w in WING_JU52],
             'fuselage', 'thick low wing, swept leading edge: a 1930s wing, deep enough to stand in at the root')
@@ -385,14 +407,15 @@ def ju52():
                 pts += [(te + 0.30, sd * yy, zw - 0.02), (te + 0.30, sd * yy, zw - 0.16), (te - 1.0, sd * yy, zw - 0.20), (te - 1.0, sd * yy, zw - 0.28)]
             m.add(f'flaps_{s}{k}', solid(pts), 'Junkers "double wing": flaps and ailerons hung in a strip under the trailing edge, the whole span' if k == 0
                   else 'double-wing strip, next panel out', on=f'wing_{s}{k}')
-        y = sd * 4.6; zc = -0.75
+        y = sd * 3.4; zc = -0.78
         m.add(f'nacelle_{s}', body([(12.5, 0.30, zc - 0.25, zc + 0.15), (14.2, 0.58, zc - 0.55, zc + 0.55), (15.2, 0.62, zc - 0.58, zc + 0.58)], y=y),
-              'wing engine mount on the leading edge', on=f'wing_{s}1', contact=[f'wing_{s}0'])
+              'wing engine mount on the leading edge, close in beside the fuselage', on=f'wing_{s}0')
         radial_cowl(m, f'cowl_{s}', 15.1, 15.85, y, zc, 0.66, f'nacelle_{s}', 'wing engine in a ring cowl')
         prop(m, f'prop_{s}', 15.85, y, zc, 1.4, 3, f'cowl_{s}', spinner=0.20, length=0.32, chord=0.26, why='3-blade propeller, 2.8 m')
-        m.add(f'gear_{s}', solid([(x, y + dy, z) for x in (12.8, 13.3) for dy in (-0.12, 0.12) for z in (-2.25, -1.0)], 'steel'),
-              'fixed main gear leg under the engine: it never retracts', on=f'wing_{s}1', contact=[f'wing_{s}0', f'nacelle_{s}'])
-        m.add(f'wheel_{s}', sh.cyl(P(13.05, y - 0.2, -2.35), P(13.05, y + 0.2, -2.35), 0.62 * M, 'rubber', seg=16),
+        yg = sd * 2.75
+        m.add(f'gear_{s}', solid([(x, yg + dy, z) for x in (12.8, 13.3) for dy in (-0.12, 0.12) for z in (-2.25, -1.0)], 'steel'),
+              'fixed main gear leg under the wing root: it never retracts', on=f'wing_{s}0')
+        m.add(f'wheel_{s}', sh.cyl(P(13.05, yg - 0.2, -2.35), P(13.05, yg + 0.2, -2.35), 0.62 * M, 'rubber', seg=16),
               'main wheel, 1.25 m: hangs out in the wind on a fixed gear', on=f'gear_{s}')
     surface(m, 'tailplane', [(0.25, 2.55, 0.10, 0.75, 0.20), (4.6, 1.85, 0.40, 0.80, 0.10)], 'fuselage', 'tailplane and elevators')
     fin(m, 'fin', [(0.85, 2.9, 0.0, 0.22), (2.4, 2.2, 0.15, 0.16), (3.4, 1.5, 0.40, 0.10)], 'fuselage', 'tall rounded fin and rudder')
@@ -418,7 +441,9 @@ def k_ship():
               its middle
     """
     m = Machine('US Navy airship (K-class blimp)', ground=None)
+    m.ref = {'envelope': None}
     prof = [(0.0, 0.0), (4.5, 6.0), (7.6, 16.0), (8.8, 30.0), (8.8, 44.0), (8.1, 58.0), (6.2, 68.0), (3.6, 74.0), (0.5, 76.7)]
+    m.ref['envelope'] = prof
     m.add('envelope', sh.blob_lathe([(r * M, z * M) for r, z in prof], 'canvas', seg=24).ry(90).move(*P(0, 0, 8.8)),
           'gas envelope, 77 m by 17.6 m: the shape is the lifting gas, so it is round and smooth')
     m.add('nose_cone', sh.cyl(P(76.4, 0, 8.8), P(77.2, 0, 8.8), 0.8 * M, 'steel', seg=12),
@@ -447,134 +472,14 @@ def k_ship():
     return m
 
 
-# ---------------------------------------------------------------- parachutes
-def _canopy(m, d, crown, skirt, why, mat='canvas', name='canopy'):
-    """An open personnel or cargo canopy: inflated diameter d, crown at z=crown, skirt at z=skirt."""
-    R = d / 2; h = crown - skirt
-    prof = [(R * 0.90, 0), (R, h * 0.18), (R * 0.97, h * 0.40), (R * 0.86, h * 0.63), (R * 0.62, h * 0.84), (R * 0.32, h * 0.97), (R * 0.07, h)]
-    m.add(name, sh.blob_lathe([(r * M, z * M) for r, z in prof], mat, seg=24).move(*P(0, 0, skirt)), why)
-    m.add('vent', disc(0, 0, crown - 0.04, crown + 0.03, R * 0.07, 'dark', seg=12), 'apex vent: lets air out the top so it does not swing', on=name, small_ok=True)
-    return R * 0.90
+BLOCKOUT = {'p47': p47, 'bf109': bf109, 'ju87': ju87, 'b25': b25, 'c47': c47, 'ju52': ju52, 'k_ship': k_ship}
+SIDE = {'p47': 'us', 'bf109': 'de', 'ju87': 'de', 'b25': 'us', 'c47': 'us', 'ju52': 'de', 'k_ship': 'us'}
+# tools/check.py reads ALL as (role, name, constructor)
+ALL = [('fighter', 'P-47D Thunderbolt', p47), ('fighter', 'Bf 109 G-6', bf109), ('dive bomber', 'Ju 87 D', ju87), ('bomber', 'B-25J Mitchell', b25),
+       ('transport', 'C-47 Skytrain', c47), ('transport', 'Ju 52/3m', ju52), ('airship', 'K-class blimp', k_ship)]
 
 
-def _lines(m, n, r, skirt, ends, why='rigging lines from the skirt down to the risers (lines that carry)'):
-    """n line bundles from the skirt (radius r, height skirt) to the nearest of `ends` [(name, (x, y, z))].
-    Returns {end name: the first line that reaches it} (what that end hangs from)."""
-    first = {}
-    for k in range(n):
-        a = 2 * math.pi * k / n + math.pi / n; top = (r * math.cos(a), r * math.sin(a), skirt + 0.02)
-        en, p = min(ends, key=lambda e: (e[1][0] - top[0]) ** 2 + (e[1][1] - top[1]) ** 2)
-        m.add(f'line{k}', rod(top, p, 0.012, 'canvas', seg=4), why, on='canopy', contact=[en], small_ok=True)
-        first.setdefault(en, f'line{k}')
-    return first
-
-
-def us_parachute():
-    """Brief
-    is:       T-5 personnel parachute, US Army 1943-44 (28 ft flat canopy, about 6.4 m across inflated)
-    does:     lowers one paratrooper at about 5 m/s; opened by static line as he leaves the C-47's door
-    gameplay: the squad's men come down under these over the drop zone, then the chutes are dropped; must read as a
-              round dome above a man with lines converging on his shoulders
-    power:    none: drag
-    moves:    sways; collapses on landing (an animation, not geometry)
-    built:    silk or nylon gores sewn into a flat circle, 28 suspension lines (12 bundles drawn) to four risers
-    references: T-5 assembly (TM 10-1601), Operation Dragoon photographs; the jumper hangs upright, risers to both shoulders
-    read_at_play_size: a pale dome over a small dark figure, joined by a fan of thin lines
-    The jumper is the unit's own sprite; a stand-in man is drawn here only for scale (part 'jumper').
-    """
-    m = Machine('US personnel parachute (T-5)', ground=None)
-    skirt, crown = 7.4, 10.6
-    r = _canopy(m, 6.4, crown, skirt, 'inflated canopy, 6.4 m across: the dome that slows the fall')
-    ends = [(f'riser_{s}', (0.0, sd * 0.35, 2.55)) for sd, s in ((1, 'l'), (-1, 'r'))]
-    first = _lines(m, 12, r, skirt, ends)
-    for (n, conf), sd in zip(ends, (1, -1)):
-        m.add(n, rod((0.0, sd * 0.20, 1.45), conf, 0.025, 'canvas', seg=4), 'riser pair down to the shoulder: he hangs upright, hands on them',
-              on=first[n], small_ok=True)
-    m.add('harness', slab(-0.10, 0.10, -0.24, 0.24, 1.35, 1.50, 'canvas'), 'harness yoke at the shoulders: where the risers clip on',
-          on='riser_l', contact=['riser_r'], small_ok=True)
-    _jumper(m, 'us', [(0.0, 0.33, 2.15), (0.0, -0.33, 2.15)])
-    return m
-
-
-def de_parachute():
-    """Brief
-    is:       RZ 20 personnel parachute, Luftwaffe 1941-44 (8.5 m flat canopy, about 6.6 m across inflated)
-    does:     lowers one Fallschirmjager; static-line opened
-    gameplay: as the US chute; the difference that carries: the RZ hangs the man from a single point at the back of
-              his waist, so he comes down leaning forward, not upright, with nothing to hold
-    power:    none: drag
-    moves:    sways; the man cannot steer it
-    built:    silk gores, 24 lines (12 bundles drawn) to a V riser joined behind the jumper's back
-    references: RZ 20 (Luftwaffe manuals), photographs of drops round Rome 1943; the forward lean is the signature
-    read_at_play_size: a dome over a figure tipped forward, the lines meeting behind his back
-    """
-    m = Machine('German personnel parachute (RZ 20)', ground=None)
-    skirt, crown = 7.5, 10.8
-    r = _canopy(m, 6.6, crown, skirt, 'inflated canopy, 6.6 m across')
-    conf = (-0.45, 0.0, 2.35)
-    first = _lines(m, 12, r, skirt, [('riser', conf)])
-    m.add('riser', rod((-0.30, 0.0, 1.05), conf, 0.03, 'canvas', seg=4), 'the V riser down to one point at the back of the waist: why he hangs forward',
-          on=first['riser'], small_ok=True)
-    m.add('harness', slab(-0.46, -0.16, -0.22, 0.22, 0.86, 1.16, 'canvas'), 'harness ring at the small of the back', on='riser', small_ok=True)
-    _jumper(m, 'de', None, lean=25)
-    return m
-
-
-def _jumper(m, side, hands, lean=0):
-    """A stand-in man for scale (review only: the game draws the unit's own man), hanging from the harness."""
-    from .infantry import crewman, STAND
-    from artkit.core.geom import RY
-    L, R = (tuple(P(*h)) for h in hands) if hands else (None, None)
-    g = crewman(side, STAND, (0, 0, 0), L=L, R=R)
-    if lean: g = g.about((-0.3 * M, 0, 1.0 * M), RY(lean))
-    m.add('jumper', g, 'stand-in paratrooper for scale (review only; the unit\'s own sprite hangs here in game)',
-          on='harness', convex=False, small_ok=True)
-
-
-def us_supply_drop():
-    """Brief
-    is:       A-5 delivery container under a G-1 24 ft cargo parachute (coloured by contents in service)
-    does:     drops ammunition, rations or medical kit from a C-47; lands hard
-    gameplay: supply-drop call-in; lands as a crate the squads pick up
-    built:    canvas-wrapped bundle (about 1.5 x 0.6 x 0.6 m) in webbing straps; four risers to a cargo canopy
-    references: A-5 container (TM 10-1601), Operation Dragoon resupply photographs
-    read_at_play_size: a smaller dome than a man's over a pale box
-    """
-    m = Machine('US supply drop (A-5 container, cargo chute)', ground=None)
-    skirt, crown = 6.4, 9.0
-    r = _canopy(m, 5.2, crown, skirt, 'cargo canopy, 5.2 m across inflated')
-    conf = (0.0, 0.0, 1.9)
-    first = _lines(m, 10, r, skirt, [('sling', conf)])
-    m.add('sling', disc(0, 0, conf[2] - 0.05, conf[2] + 0.05, 0.08, 'steel'), 'link where the lines meet the sling', on=first['sling'], small_ok=True)
-    m.add('bundle', slab(-0.75, 0.75, -0.32, 0.32, 0.0, 0.62, 'canvas'), 'A-5 bundle: the supplies, wrapped in canvas', on='strap0')
-    for k, (sx, sy) in enumerate(((1, 1), (1, -1), (-1, 1), (-1, -1))):
-        m.add(f'strap{k}', rod((sx * 0.70, sy * 0.28, 0.62), conf, 0.02, 'canvas', seg=4), 'sling strap from a corner of the bundle up to the link',
-              on='sling', contact=['bundle'], small_ok=True)
-    return m
-
-
-def de_supply_drop():
-    """Brief
-    is:       Abwurfbehalter 250 supply canister under its cargo parachute
-    does:     drops weapons and ammunition to Fallschirmjager; a crushable bumper cap takes the landing
-    gameplay: German supply-drop call-in
-    built:    steel cylinder about 1.7 m long and 0.4 m across, hanging nose down, crush cap at the bottom, the
-              parachute packed in the top end
-    references: Abwurfbehalter (Luftwaffe drawings), Crete and Italy photographs
-    read_at_play_size: a dome over a short dark upright tube
-    """
-    m = Machine('German supply drop (Abwurfbehalter)', ground=None)
-    skirt, crown = 6.8, 9.5
-    r = _canopy(m, 5.4, crown, skirt, 'cargo canopy, 5.4 m across inflated')
-    conf = (0.0, 0.0, 2.4)
-    first = _lines(m, 10, r, skirt, [('riser', conf)])
-    m.add('riser', rod((0, 0, 1.74), conf, 0.03, 'canvas', seg=4), 'riser from the lines down to the canister top', on=first['riser'], small_ok=True)
-    m.add('canister', sh.cyl(P(0, 0, 0.25), P(0, 0, 1.75), 0.21 * M, 'hull', seg=14), 'steel supply canister, hanging upright', on='riser')
-    m.add('crush_cap', sh.cyl(P(0, 0, 0.0), P(0, 0, 0.27), 0.18 * M, 'steel', r1=0.22 * M, seg=14), 'crush cap: takes the landing', on='canister')
-    return m
-
-
-ALL = [('us', 'fighter', p47), ('de', 'fighter', bf109), ('de', 'dive bomber', ju87), ('us', 'bomber', b25),
-       ('us', 'transport', c47), ('de', 'transport', ju52), ('us', 'airship', k_ship),
-       ('us', 'parachute', us_parachute), ('de', 'parachute', de_parachute),
-       ('us', 'supply drop', us_supply_drop), ('de', 'supply drop', de_supply_drop)]
+def finished(key):
+    """The blockout with its finishing pass and paint (models/air_finish.py): what the game would export."""
+    from . import air_finish
+    return air_finish.paint(air_finish.apply(BLOCKOUT[key](), key), key)
