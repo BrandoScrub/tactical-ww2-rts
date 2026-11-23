@@ -34,11 +34,10 @@ for (const [i, want] of [[0, 'damaged'], [1, 'ruined'], [2, 'normal']]) {
   const h = H[i]; RENDER.cam.x = h.x; RENDER.cam.y = h.y; RENDER.cam.k = 1; calls.length = 0;
   RENDER.frame(G, ui, 0);
   const got = calls.filter(c => c.im && c.im.tag && c.im.tag.startsWith(h.art + ':')).map(c => c.im.tag);
-  const sprite = calls.find(c => c.im && c.im.tag === h.art + ':' + want);
-  const ok = sprite && got.includes(h.art + ':' + want + ':shadow');
-  // the sprite's near corner lands on the footprint's near corner
+  // the sprite's near corner lands on the footprint's near corner (another house with the same art may be in view too)
   const S = sc[h.art].states[want], [nx, ny] = RENDER.toScreen(h.x + h.w / 2, h.y + h.d / 2);
-  const pos = sprite && Math.abs(sprite.a[0] + S.near_corner[0] - nx) < .01 && Math.abs(sprite.a[1] + S.near_corner[1] - ny) < .01;
+  const sprite = calls.find(c => c.im && c.im.tag === h.art + ':' + want && Math.abs(c.a[0] + S.near_corner[0] - nx) < .01 && Math.abs(c.a[1] + S.near_corner[1] - ny) < .01);
+  const ok = sprite && got.includes(h.art + ':' + want + ':shadow'), pos = !!sprite;
   console.log(`house ${i} ${h.art}: want ${want}, drew [${[...new Set(got)].join(', ')}] ${ok && pos ? 'ok' : 'FAIL'}`); if (!(ok && pos)) bad++;
   const rubble = G.map.covers.filter(c => c.house === h.id);
   if (want === 'ruined' && !rubble.length) { console.log('FAIL no rubble cover after collapse'); bad++; }

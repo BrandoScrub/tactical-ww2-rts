@@ -347,8 +347,7 @@ const HUD = (() => {
         const [a, bb] = mmToScreen(x + 1, y + 1), edge = Math.floor(MAP.hAt(m, x + 3, y + 1) / 1.5) !== Math.floor(h / 1.5) || Math.floor(MAP.hAt(m, x + 1, y + 3) / 1.5) !== Math.floor(h / 1.5);
         bg.fillStyle = edge ? 'rgba(30,26,16,.35)' : `rgba(230,215,160,${Math.min(.35, h * .055)})`; bg.fillRect(a - 1.3, bb - 1.3, 2.6, 2.6);
       }
-      bg.strokeStyle = '#a89878'; bg.lineWidth = 2;
-      for (const rd of m.roads) { bg.beginPath(); rd.forEach(([x, y], i) => { const [a, bb] = mmToScreen(x, y); i ? bg.lineTo(a, bb) : bg.moveTo(a, bb); }); bg.stroke(); }
+      for (const rd of m.roads) { bg.strokeStyle = rd.kind === 'track' ? '#8f7a5a' : '#a89878'; bg.lineWidth = rd.kind === 'track' ? 1.3 : 2; bg.beginPath(); rd.pts.forEach(([x, y], i) => { const [a, bb] = mmToScreen(x, y); i ? bg.lineTo(a, bb) : bg.moveTo(a, bb); }); bg.stroke(); }
       bg.fillStyle = '#2f3a22'; for (const t of m.trees) { const [a, bb] = mmToScreen(t.x, t.y); bg.fillRect(a - 1, bb - 1, 2.5, 2.5); }
       bg.fillStyle = '#c9b89a'; for (const hh of m.houses) { const [a, bb] = mmToScreen(hh.x, hh.y); bg.fillRect(a - 2.5, bb - 2.5, 5, 5); }
       el.mmBase = b;
