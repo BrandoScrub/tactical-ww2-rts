@@ -410,9 +410,15 @@ const AI = (() => {
       if (!SIM.connected(G, slot, p) && p.type !== 'victory') v *= .5;   // a cut-off point pays nothing (victory points still count)
       const threat = visibleEnemies.filter(e => U.dist2(e.x, e.y, p.x, p.y) < 30 * 30).length;
       if (p.owner === slot && threat) v *= 2.5;
-      return { p, v, assigned: 0 };
+      return { p, v, assigned: 0, takers: 0 };
     });
     const units = mine.filter(e => e.type !== 'building');
+    // Only infantry and vehicles with `capture` (the Kettenkrad's stand-in) can take a point; a jeep, armoured car or
+    // tank can't (CoH3). Those go only to points we hold or points our own capturers are taking, as escort, and don't
+    // count as the point's taker (a jeep counted as one kept squads away while it sat on a point it could never take).
+    const canCapture = e => e.type === 'squad' || !!e.def.capture;
+    for (const g of goals) g.takers = units.filter(e => canCapture(e) && !e.retreating && (U.dist2(e.x, e.y, g.p.x, g.p.y) < (g.p.radius + 4) ** 2 ||
+      e.order && e.order.x != null && U.dist2(e.order.x, e.order.y, g.p.x, g.p.y) < (g.p.radius + 4) ** 2)).length;
     for (const e of units) {
       // pull back when losing
       if (e.type === 'squad') {
@@ -552,7 +558,9 @@ const AI = (() => {
       }
       // pick a goal: high value, near, not already crowded
       let best = null, bs = -1e9;
+      const capper = canCapture(e);
       for (const g of goals) {
+        if (!capper && g.p.owner !== slot && !g.takers) continue;
         const d = Math.hypot(g.p.x - e.x, g.p.y - e.y);
         // builders take only points close to home: losing the only builder stalls the whole tech tree
         if (e.def.builder && Math.hypot(g.p.x - hq.x, g.p.y - hq.y) > 75) continue;
@@ -561,7 +569,7 @@ const AI = (() => {
         if (s > bs) { bs = s; best = g; }
       }
       if (!best) continue;
-      best.assigned++;
+      if (capper) { best.assigned++; best.takers++; }
       const p = best.p;
       // team weapons sit a little back from the point, facing the enemy
       const toward = enemyHq ? Math.atan2(enemyHq.y - p.y, enemyHq.x - p.x) : 0;
