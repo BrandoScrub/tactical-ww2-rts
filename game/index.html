@@ -171,6 +171,35 @@
   #fps { position: fixed; left: 50%; bottom: 4px; transform: translateX(-50%); z-index: 30; font: 600 12px Inter, system-ui; color: #cfe; background: #000a; padding: 2px 8px; pointer-events: none; }
   #fps.hide { display: none; }
   body.mobile .logo { font-size: 38px; } body.mobile .mmi { padding: 9px 14px; } body.mobile .mmi b { font-size: 20px; } body.mobile .mmpanel .era { margin-bottom: 14px; }
+  /* ---- map editor ---- */
+  #editor { display: block; background: #202219; touch-action: none; }
+  #editor.hide { display: none; }
+  #edcv { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+  #editor button, #editor select, #editor input[type=text] { font: 600 13px Inter, system-ui, sans-serif; color: var(--text); background: linear-gradient(#3a3b37, #222320); border: 1px solid #000; box-shadow: inset 0 0 0 1px #555; padding: 6px 10px; min-height: 34px; cursor: pointer; border-radius: 3px; }
+  #editor button.on { box-shadow: inset 0 0 0 2px var(--gold); color: var(--gold); } #editor button.go { box-shadow: inset 0 0 0 1px var(--gold); color: var(--gold); } #editor button.warn { color: #ff8a6a; }
+  #editor input[type=text] { cursor: text; background: #111; width: 150px; }
+  .ed-top { position: absolute; top: 6px; left: 6px; right: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; pointer-events: none; }
+  .ed-top > * { pointer-events: auto; }
+  .ed-tools { position: absolute; left: 6px; top: 54px; bottom: 86px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; width: 84px; }
+  .ed-tools button { width: 100%; padding: 4px 6px !important; min-height: 30px !important; }
+  .ed-bottom { position: absolute; left: 96px; right: 6px; bottom: 6px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+  .ed-bottom > * { pointer-events: auto; align-self: flex-start; }
+  #ed-hint { background: #000a; padding: 4px 8px; font-size: 12px; color: var(--dim); border-radius: 3px; }
+  #ed-props { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; background: #000a; padding: 4px; border-radius: 3px; }
+  #ed-props:empty { display: none; } #ed-props span { font-size: 12px; color: var(--dim); margin: 0 2px 0 6px; }
+  #ed-props .sw { width: 26px; min-width: 26px; padding: 0 !important; } #ed-props .sw.on { box-shadow: inset 0 0 0 3px #fff; }
+  .ed-out { position: absolute; right: 6px; top: 54px; width: min(420px, 70vw); max-height: calc(100% - 150px); overflow: auto; background: linear-gradient(#262826, #161716); border: 1px solid #000; box-shadow: inset 0 0 0 1px #6b6250, 0 6px 24px #000; padding: 10px 12px; font-size: 13px; }
+  .ed-out.hide, .ed-flash.hide { display: none; }
+  .ed-out ul { margin: 4px 0 8px; padding-left: 18px; } .ed-out .bad { color: #ff8a6a; } .ed-out .warn { color: #e3c048; } .ed-out .ok { color: #8fd06a; margin-top: 6px; }
+  .ed-out table { border-collapse: collapse; margin: 6px 0; } .ed-out td, .ed-out th { padding: 2px 8px 2px 0; text-align: left; } .ed-out th { color: var(--dim); font-weight: 600; }
+  .ed-out .row2 { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 10px; align-items: center; }
+  .ed-out textarea { width: 100%; height: 70px; background: #111; color: #cfc; border: 1px solid #444; font: 11px monospace; }
+  .ed-out .filebtn { font: 600 13px Inter, system-ui; background: linear-gradient(#3a3b37, #222320); border: 1px solid #000; box-shadow: inset 0 0 0 1px #555; padding: 7px 10px; border-radius: 3px; cursor: pointer; }
+  .ed-out .filebtn input { display: none; }
+  .ed-flash { position: absolute; left: 50%; top: 56px; transform: translateX(-50%); background: #000c; padding: 6px 12px; border-left: 3px solid var(--gold); font-size: 13px; }
+  body.mobile .ed-tools { width: 70px; top: 50px; } body.mobile .ed-bottom { left: 80px; }
+  body.mobile #editor button, body.mobile #editor select { min-height: 30px; padding: 4px 7px; font-size: 12px; }
+  body.mobile #editor input[type=text] { width: 100px; }
   @media (max-width: 600px) { .sides { grid-template-columns: 1fr; } .logo { font-size: 36px; } }
 </style>
 </head>
@@ -196,6 +225,7 @@
     <button class="mmi" id="mm-skirmish" data-needs-ready disabled><b>Skirmish</b><small>1v1 against the AI, victory points</small></button>
     <button class="mmi" id="mm-sandbox" data-needs-ready disabled><b>Sandbox</b><small>test mode: you start with 10,000 of every resource</small></button>
     <button class="mmi" id="mm-watch" data-needs-ready disabled><b>Watch AI</b><small>AI against AI, adjustable speed, fog on or off</small></button>
+    <button class="mmi" id="mm-editor" data-needs-ready disabled><b>Map editor</b><small>draw maps and sketch ideas; export them or play on them</small></button>
     <button class="mmi" id="mm-howto"><b>How to play</b><small>controls for mouse and keyboard, or touch</small></button>
     <button class="mmi" id="mm-settings"><b>Settings</b><small>controls, graphics, frame counter</small></button>
   </nav>
@@ -205,7 +235,8 @@
   <div class="box">
     <h2>Skirmish</h2>
     <div class="sub" id="sk-mode"></div>
-    <div class="sub">Farm valley &middot; 1v1 against the AI &middot; three victory points. Hold more of them than the enemy to bleed their score to zero.</div>
+    <div class="sub">1v1 against the AI &middot; three victory points. Hold more of them than the enemy to bleed their score to zero.</div>
+    <div class="row" style="margin-bottom:12px">Map <select id="mapsel"></select></div>
     <div class="sides">
       <button class="side us" id="start" data-needs-ready disabled><h3>US Forces</h3><p>Base buildings ordered from the HQ. Riflemen, Weapon Support, Motor Pool, Tank Depot. Shermans and M10s late.</p></button>
       <button class="side de" id="start2" data-needs-ready disabled><h3>Wehrmacht</h3><p>Base buildings ordered from the HQ. Grenadiers, MG 42s, Panzergrenadiers, StuG and Panzer IV.</p></button>
@@ -252,6 +283,20 @@
   </div>
 </div>
 
+<div id="editor" class="screen hide">
+  <canvas id="edcv"></canvas>
+  <div class="ed-top">
+    <button id="ed-back">&#8592; Menu</button><input id="ed-name" type="text" maxlength="40" aria-label="Map name">
+    <button id="ed-undo" title="Undo (Ctrl+Z)">Undo</button><button id="ed-redo" title="Redo (Ctrl+Y)">Redo</button>
+    <button id="ed-mirror" title="New things also get a turned copy for the other side">Mirror</button><button id="ed-grid">Grid</button><button id="ed-fit">Fit</button>
+    <button id="ed-check">Check</button><button id="ed-files">Files</button><button id="ed-play" class="go">Play</button>
+  </div>
+  <div id="ed-tools" class="ed-tools"></div>
+  <div class="ed-bottom"><div id="ed-hint"></div><div id="ed-props"></div></div>
+  <div id="ed-out" class="ed-out hide"></div>
+  <div id="ed-flash" class="ed-flash hide"></div>
+</div>
+
 <div id="deploy" class="screen hide"><div class="bootc"><div class="logo small">Deploying forces…</div><p class="era"></p></div></div>
 <div id="rotate"><div><div class="ph">&#128241;</div><h2>Turn your phone sideways</h2><p class="sub">The battlefield and HUD need landscape.</p><button class="bigbtn" id="rotok">Play in portrait anyway</button></div></div>
 <div id="pausemenu" class="screen hide"><div class="box narrow"><h2>Paused</h2><p class="sub">The match is stopped while this menu is open.</p><button class="bigbtn" id="resume">Resume</button><button class="bigbtn ghost" id="p-settings">Settings</button><button class="bigbtn ghost" id="quit">Quit to main menu</button></div></div>
@@ -262,6 +307,7 @@
 <script src="../artkit/runtime/artkit.js"></script>
 <script src="src/util.js"></script>
 <script src="src/data.js"></script>
+<script src="src/maps.js"></script>
 <script src="src/map.js"></script>
 <script src="src/fog.js"></script>
 <script src="src/combat.js"></script>
@@ -269,6 +315,7 @@
 <script src="src/ai.js"></script>
 <script src="src/render.js"></script>
 <script src="src/hud.js"></script>
+<script src="src/editor.js"></script>
 <script src="src/main.js"></script>
 </body>
 </html>

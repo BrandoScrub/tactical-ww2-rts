@@ -1,91 +1,80 @@
-/* The skirmish map: an Italian farm valley fought over between two bases. Generated from a seed, mirrored across
-   the x = y diagonal so both sides get the same ground. World units are metres; +x runs down-right on screen and +y
-   down-left, so the two bases sit at the left and right of the view and the victory points run down the middle.
+/* The skirmish map, built from a map definition (maps.js, or one made in the map editor). World units are metres; +x
+   runs down-right on screen and +y down-left, so the two bases sit at the left and right of the view.
 
    Grids are 1 m cells. Flags in `block`: 1 stops infantry, 2 stops vehicles, 4 blocks sight. `area` holds ground
    cover: 0 none, 1 light, 2 heavy, 3 negative (none on this map; roads are open ground). Cover objects (walls, sandbags, wire, tank traps) are
    segments, kept in a coarse bucket grid for fast lookup; their cover only counts against fire that crosses them. */
 const MAP = (() => {
-  const W = 200, H = 200, SEC = 2;                   // sector grid: 2 m cells
+  const SEC = 2;                                     // sector grid: 2 m cells
   const BI = 1, BV = 2, BL = 4;
+  const MAPDEFS = typeof MAPS !== 'undefined' ? MAPS : require('./maps.js');
+  const ROAD_HALF = { road: 3.2, track: 2.1 };        // half widths in metres: white gravel road, dirt farm track
+  // the farmhouse art for each footprint (tools/build_scenery.py; the long side is the ridge). '_r' is the same house
+  // turned so its ridge runs along y; a square one uses it when the definition says turn.
+  const HOUSE_ART = { '9x7': 'farmhouse_stair', '6x6': 'cottage', '8x6': 'farmhouse_long', '9x6': 'farmhouse_tower', '7x6': 'farmhouse_small', '7x7': 'farmhouse_square' };
+  const STAIR_ART = new Set(['farmhouse_stair', 'farmhouse_tower', 'farmhouse_long']);
+  /* polygon helpers (fields) */
+  function inPoly(P, x, y) { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; }
+  function polyEdgeDist(P, x, y) { let d = 1e18; for (let i = 0, j = P.length - 1; i < P.length; j = i++) d = Math.min(d, U.segDist2(x, y, P[j][0], P[j][1], P[i][0], P[i][1])); return Math.sqrt(d); }
 
-  function create(seed) {
+  /* Build the playable map from a definition (maps.js; the editor's format). def: a definition object, or the name of
+     one in MAPS; default MAPS.default. seed only varies small things (sandbag arcs, tree jitter, house paint). */
+  function create(seed, def) {
+    if (!def || typeof def === 'string') def = MAPDEFS[def || MAPDEFS.default];
+    const W = def.w || 200, H = def.h || 200;
     const R = U.rng(seed || 7);
     const m = {
       w: W, h: H, block: new Uint8Array(W * H), area: new Uint8Array(W * H), road: new Uint8Array(W * H),
       covers: [], coverBuckets: new Map(), houses: [], trees: [], craters: [], fields: [], roads: [], points: [], sectors: [],
-      sectorGrid: null, bases: [], navDirty: true, version: 0, seed: seed || 7,
+      sectorGrid: null, bases: [], navDirty: true, version: 0, seed: seed || 7, id: def.id || 'custom', name: def.name || 'Custom map',
     };
     const idx = (x, y) => y * W + x;
     const inside = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
-    const mir = p => ({ ...p, x: p.y, y: p.x });
+    const pts = a => (a || []).map(p => [+p[0], +p[1]]);
 
-    /* ---- bases: side A (left of screen) and side B (right) ---- */
-    m.bases = [{ slot: 0, x: 30, y: 170, hq: { x: 30, y: 170 } }, { slot: 1, x: 170, y: 30, hq: { x: 170, y: 30 } }];
+    /* ---- bases: slot 0 (left of screen) and slot 1 (right) ---- */
+    m.bases = def.bases.slice(0, 2).map((b, slot) => ({ slot, x: b.x, y: b.y, hq: { x: b.x, y: b.y } }));
 
-    /* ---- roads (symmetric polylines) ---- */
-    m.roads = [
-      [[14, 186], [46, 154], [70, 134], [100, 100], [134, 70], [154, 46], [186, 14]],
-      [[52, 196], [98, 172], [145, 145], [172, 98], [196, 52]],
-      [[4, 148], [28, 100], [55, 55], [100, 28], [148, 4]],
-      [[70, 134], [92, 160], [118, 158], [145, 145]],
-      [[134, 70], [160, 92], [158, 118], [145, 145]],
-      [[70, 134], [52, 110], [44, 82], [55, 55]],
-      [[134, 70], [110, 52], [82, 44], [55, 55]],
-    ];
-    const roadW = 3.2;
-    for (const rd of m.roads) for (let i = 0; i < rd.length - 1; i++) {
-      const [ax, ay] = rd[i], [bx, by] = rd[i + 1];
-      const x0 = Math.floor(Math.min(ax, bx) - 4), x1 = Math.ceil(Math.max(ax, bx) + 4), y0 = Math.floor(Math.min(ay, by) - 4), y1 = Math.ceil(Math.max(ay, by) + 4);
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (inside(x, y)) {
-        const d = Math.sqrt(U.segDist2(x + .5, y + .5, ax, ay, bx, by));
-        if (d < roadW) m.road[idx(x, y)] = Math.max(m.road[idx(x, y)], d < roadW - 1 ? 2 : 1);
+    /* ---- roads: white gravel roads and narrower dirt farm tracks ---- */
+    m.roads = (def.roads || []).filter(r => r.pts && r.pts.length > 1).map(r => ({ kind: r.kind === 'track' ? 'track' : 'road', pts: pts(r.pts) }));
+    for (const rd of m.roads) {
+      const roadW = ROAD_HALF[rd.kind];
+      for (let i = 0; i < rd.pts.length - 1; i++) {
+        const [ax, ay] = rd.pts[i], [bx, by] = rd.pts[i + 1];
+        const x0 = Math.floor(Math.min(ax, bx) - 4), x1 = Math.ceil(Math.max(ax, bx) + 4), y0 = Math.floor(Math.min(ay, by) - 4), y1 = Math.ceil(Math.max(ay, by) + 4);
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (inside(x, y)) {
+          const d = Math.sqrt(U.segDist2(x + .5, y + .5, ax, ay, bx, by));
+          if (d < roadW) m.road[idx(x, y)] = Math.max(m.road[idx(x, y)], d < roadW - 1 ? 2 : 1);
+        }
       }
     }
 
     /* ---- capture points ---- */
-    const halfPoints = [
-      { type: 'standard', x: 52, y: 146 }, { type: 'standard', x: 80, y: 176 }, { type: 'munitions', x: 50, y: 112 },
-      { type: 'fuel', x: 112, y: 172 }, { type: 'standard', x: 84, y: 132 },
-    ];
     let pid = 0;
-    const addPoint = p => { m.points.push({ id: pid++, type: p.type, x: p.x, y: p.y, owner: -1, cap: 0, capSide: -1, radius: p.type === 'victory' ? 8 : 6.5 }); };
-    for (const p of halfPoints) { addPoint(p); addPoint(mir(p)); }
-    addPoint({ type: 'victory', x: 100, y: 100 }); addPoint({ type: 'victory', x: 58, y: 58 }); addPoint({ type: 'victory', x: 142, y: 142 });
+    for (const p of def.points || []) m.points.push({ id: pid++, type: p.type, x: p.x, y: p.y, owner: -1, cap: 0, capSide: -1, radius: p.type === 'victory' ? 8 : 6.5 });
 
-    /* ---- reserved ground: bases, points, roads stay clear of scenery ---- */
+    /* ---- reserved ground: bases, points, roads, houses stay clear of trees ---- */
     const clear = (x, y) => {
-      for (const b of m.bases) if (U.dist2(x, y, b.x, b.y) < 44 * 44) return false;
+      for (const b of m.bases) if (U.dist2(x, y, b.x, b.y) < 30 * 30) return false;
       for (const p of m.points) if (U.dist2(x, y, p.x, p.y) < 12 * 12) return false;
       if (inside(x | 0, y | 0) && m.road[idx(x | 0, y | 0)]) return false;
+      for (const h of def.houses || []) if (Math.abs(x - h.x) < h.w / 2 + 2.5 && Math.abs(y - h.y) < h.d / 2 + 2.5) return false;
       return x > 3 && y > 3 && x < W - 3 && y < H - 3;
     };
 
-    /* ---- farm fields (ground decoration, a few with low walls on one edge) ---- */
-    const fieldPal = ['wheat', 'stubble', 'green', 'ploughed', 'olive'];
-    for (let i = 0; i < 26; i++) {
-      const x = R.range(8, 190), y = R.range(8, 190);
-      if (y < x - 8) continue;                       // generate the A half, mirror below
-      const f = { x, y, w: R.range(14, 30), h: R.range(12, 26), kind: R.pick(fieldPal), rot: R.pick([0, 0, 0.3, -0.3]) };
-      m.fields.push(f); if (Math.abs(x - y) > 10) m.fields.push({ ...f, x: y, y: x, w: f.h, h: f.w, rot: -f.rot });
-    }
+    /* ---- farm fields (ground decoration: crops in rows) ---- */
+    m.fields = (def.fields || []).filter(f => f.pts && f.pts.length > 2).map(f => ({ kind: f.kind, pts: pts(f.pts), rot: +f.rot || 0 }));
 
     /* ---- elevation (CoH3: height extends sight, hides what is behind a crest, and shooting down ignores cover) ----
-       Heights on the corner grid of the 1 m cells, in metres. Built from hills listed for one half and mirrored across
-       the x = y diagonal, so both sides get the same ground, plus a gentle symmetric swell. Bases stay flat. */
+       Heights on the corner grid of the 1 m cells, in metres: the listed hills over a gentle swell that is the same
+       turned half a turn about the centre. Bases stay flat. */
     const HW = W + 1;
     m.hgt = new Float32Array(HW * (H + 1));
-    const hills = [
-      { x: 100, y: 100, r: 20, h: 4.5 },      // the rise under the central victory point
-      { x: 62, y: 118, r: 15, h: 6 },         // a hill over the munitions point and the road junction
-      { x: 108, y: 160, r: 12, h: 4 },        // a knoll by the fuel point
-      { x: 36, y: 92, r: 11, h: 3.5 },        // a low hill on the outer flank
-    ];
-    const allHills = hills.concat(hills.filter(h => h.x !== h.y).map(h => ({ ...h, x: h.y, y: h.x })));
-    const swell = (x, y) => { const a = x + y, b = Math.abs(x - y); return .55 * Math.sin(a * .045 + 1.3) * Math.cos(b * .06) + .35 * Math.sin(b * .09 + .4); };
+    const hills = def.hills || [], amp = def.swell == null ? .35 : +def.swell;
+    const swell = (x, y) => { const a = x - W / 2, b = y - H / 2; return amp * (Math.cos(a * .05) * Math.cos(b * .043) + .6 * Math.cos((a + b) * .031)); };
     for (let y = 0; y <= H; y++) for (let x = 0; x <= W; x++) {
-      let h = Math.max(0, swell(x, y) + .5);
-      for (const k of allHills) { const d2 = ((x - k.x) ** 2 + (y - k.y) ** 2) / (k.r * k.r); if (d2 < 4) h += k.h * Math.exp(-d2 * 1.6) * (1 - d2 / 4); }
+      let h = Math.max(0, swell(x, y) + amp);
+      for (const k of hills) { const d2 = ((x - k.x) ** 2 + (y - k.y) ** 2) / (k.r * k.r); if (d2 < 4) h += k.h * Math.exp(-d2 * 1.6) * (1 - d2 / 4); }
       // bases flat (they ramp up from 40 m out)
       let flat = 1; for (const b of m.bases) { const d = Math.hypot(x - b.x, y - b.y); flat = Math.min(flat, U.clamp((d - 40) / 18, 0, 1)); }
       m.hgt[y * HW + x] = h * flat;
@@ -100,19 +89,11 @@ const MAP = (() => {
       }
     };
 
-    /* ---- houses: farmsteads and a hamlet round the centre ---- */
-    const halfHouses = [
-      { x: 90, y: 116, w: 9, d: 7 }, { x: 80, y: 106, w: 6, d: 6 }, { x: 64, y: 70, w: 8, d: 6 }, { x: 128, y: 156, w: 9, d: 6 },
-      { x: 30, y: 122, w: 7, d: 6 }, { x: 62, y: 152, w: 8, d: 6 }, { x: 100, y: 140, w: 6, d: 8 }, { x: 46, y: 84, w: 7, d: 7 },
-    ];
-    // the farmhouse art for each footprint (tools/build_scenery.py; the long side is the ridge). '_r' is the same house
-    // turned so its ridge runs along y; square ones use it for the mirrored copy, so the two halves differ.
-    const HOUSE_ART = { '9x7': 'farmhouse_stair', '6x6': 'cottage', '8x6': 'farmhouse_long', '9x6': 'farmhouse_tower', '7x6': 'farmhouse_small', '7x7': 'farmhouse_square' };
-    const STAIR_ART = new Set(['farmhouse_stair', 'farmhouse_tower', 'farmhouse_long']);
-    const addHouse = (h, mirror) => {
+    /* ---- houses ---- */
+    const addHouse = h => {
       const house = { id: m.houses.length, x: h.x, y: h.y, w: h.w, d: h.d, hp: 1200, maxHp: 1200, occ: null, dead: false, roof: R.pick(['tile', 'tile', 'slate']), wall: R.pick(['stucco', 'stone', 'stucco']) };
       const art = HOUSE_ART[Math.max(h.w, h.d) + 'x' + Math.min(h.w, h.d)];
-      if (art) house.art = art + (h.w < h.d || (h.w === h.d && mirror) ? '_r' : '');
+      if (art) house.art = art + (h.w < h.d || (h.w === h.d && h.turn) ? '_r' : '');
       m.houses.push(house); m.flatPad(h.x, h.y, h.w, h.d);
       for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2); y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++)
         if (inside(x, y)) m.block[idx(x, y)] |= BI | BV | BL;
@@ -129,7 +110,7 @@ const MAP = (() => {
           if (inside(x, y) && x + .5 >= box[0] && x + .5 <= box[1] && y + .5 >= box[2] && y + .5 <= box[3]) m.block[idx(x, y)] |= BI;   // cells whose centre is on the stair
       }
     };
-    for (const h of halfHouses) { addHouse(h); addHouse({ ...h, x: h.y, y: h.x, w: h.d, d: h.w }, true); }
+    for (const h of def.houses || []) if (HOUSE_ART[Math.max(h.w, h.d) + 'x' + Math.min(h.w, h.d)]) addHouse(h);
 
     /* ---- cover segments ---- */
     /* A cover line is made of pieces about PIECE_M[kind] metres long, each with its own health (hp is per piece).
@@ -156,49 +137,53 @@ const MAP = (() => {
       m.navDirty = true; m.version++;
       return h;
     };
-    /* field walls and hedges stay out of the bases, so there is open ground to build on */
-    const nearBase = (ax, ay, bx, by) => m.bases.some(b => U.segDist2(b.x, b.y, ax, ay, bx, by) < 50 * 50);
-    const addBoth = (kind, ax, ay, bx, by, opts) => {
-      if (!nearBase(ax, ay, bx, by)) addCover(kind, ax, ay, bx, by, opts);
-      if (Math.abs(ax - ay) + Math.abs(bx - by) > 4 && !nearBase(ay, ax, by, bx)) addCover(kind, ay, ax, by, bx, opts);
-    };
-
-    /* stone walls along field edges and lanes */
-    const halfWalls = [
-      [[56, 162], [70, 150]], [[34, 136], [48, 136]], [[66, 120], [74, 108]], [[96, 150], [110, 150]], [[118, 182], [130, 170]],
-      [[22, 108], [34, 104]], [[74, 92], [70, 80]], [[104, 128], [114, 120]], [[40, 172], [52, 182]], [[86, 186], [96, 178]],
-    ];
-    for (const [[ax, ay], [bx, by]] of halfWalls) addBoth('wall', ax, ay, bx, by, { cover: 'heavy', blocksV: true, hp: 900 });
-    /* hedgerows: light cover, block vehicles */
-    const halfHedges = [[[20, 160], [32, 168]], [[60, 132], [56, 124]], [[100, 162], [92, 168]], [[34, 92], [40, 100]], [[118, 136], [126, 128]]];
-    for (const [[ax, ay], [bx, by]] of halfHedges) addBoth('hedge', ax, ay, bx, by, { cover: 'light', blocksV: true, hp: 300 });
-    /* sandbags ringing the points, as on the reference boards (map-placed, heavy cover) */
-    for (const p of m.points) {
-      const n = p.type === 'victory' ? 3 : p.type === 'standard' ? 1 : 2;
-      const base = R.range(0, U.TAU);
+    const addLine = (kind, line, opts) => { const p = pts(line); for (let i = 0; i < p.length - 1; i++) if (Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]) > .3) addCover(kind, p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], opts); };
+    /* stone walls (heavy cover) and hedgerows (light cover); both stop vehicles */
+    for (const l of def.walls || []) addLine('wall', l, { cover: 'heavy', blocksV: true, hp: 900 });
+    for (const l of def.hedges || []) addLine('hedge', l, { cover: 'light', blocksV: true, hp: 300 });
+    for (const l of def.sandbags || []) addLine('sandbags', l, { cover: 'heavy', hp: 220 });
+    /* sandbags ringing the points (map-placed, heavy cover): arcs facing the map centre for resource points, three
+       even arcs round a victory point, so both sides' points are dug in alike. An arc that would lie on a road is
+       turned round the point, a step at a time, until it is clear of it. */
+    const onRoad = (x, y) => inside(x | 0, y | 0) && m.road[idx(x | 0, y | 0)] > 0;
+    if (def.pointBags !== false) for (const p of m.points) {
+      const n = p.type === 'victory' ? 3 : p.type === 'standard' ? 1 : 2, r = p.radius + 3.5, span = .55;
+      const base = Math.atan2(H / 2 - p.y, W / 2 - p.x) + (p.type === 'victory' ? Math.PI / 2 : n === 2 ? -Math.PI / 2 * .6 : 0);
+      const arcAt = a => { const ps = []; for (let s = 0; s <= 6; s++) { const t = a - span + 2 * span * s / 6; ps.push([p.x + Math.cos(t) * r, p.y + Math.sin(t) * r]); } return ps; };
+      const used = [];
       for (let k = 0; k < n; k++) {
-        const a = base + k * U.TAU / n, r = p.radius + 3.5, span = .55;
-        const pts = [];
-        for (let s = 0; s <= 3; s++) { const t = a - span + 2 * span * s / 3; pts.push([p.x + Math.cos(t) * r, p.y + Math.sin(t) * r]); }
-        for (let s = 0; s < 3; s++) {
-          const [ax, ay] = pts[s], [bx, by] = pts[s + 1];
-          if (inside(ax | 0, ay | 0) && inside(bx | 0, by | 0)) addCover('sandbags', ax, ay, bx, by, { cover: 'heavy', hp: 220 });
+        const a0 = base + k * (n === 2 ? Math.PI * .6 : U.TAU / n);
+        let a = null;
+        for (const step of [0, .25, -.25, .5, -.5, .75, -.75, 1, -1, 1.3, -1.3]) {
+          const t = a0 + step, ps = arcAt(t);
+          if (ps.every(([x, y]) => inside(x | 0, y | 0) && !onRoad(x, y)) && used.every(u => Math.abs(U.angNorm(u - t)) > span * 2.2)) { a = t; break; }
         }
+        if (a == null) continue;
+        used.push(a);
+        const ps = arcAt(a).filter((_, i) => i % 2 === 0);
+        for (let s = 0; s < 3; s++) addCover('sandbags', ps[s][0], ps[s][1], ps[s + 1][0], ps[s + 1][1], { cover: 'heavy', hp: 220 });
       }
     }
 
-    /* ---- trees: olive groves and cypress lines; groves are light cover and stop vehicles ---- */
-    for (let g = 0; g < 16; g++) {
-      const cx = R.range(10, 190), cy = R.range(10, 190);
-      if (cy < cx + 6) continue;
-      const n = R.int(6, 16), rad = R.range(6, 13);
-      for (let i = 0; i < n; i++) {
-        const a = R.range(0, U.TAU), r = Math.sqrt(R()) * rad, x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-        if (!clear(x, y) || !clear(y, x)) continue;
-        const t = { x, y, kind: R() < .75 ? 'olive' : 'cypress', s: R.range(.85, 1.2), seed: R.int(0, 1e6) };
-        m.trees.push(t); m.trees.push({ ...t, x: y, y: x, seed: t.seed + 1 });
+    /* ---- trees: olive groves planted in rows in olive fields, cypress lines, single trees; light cover, stop vehicles ---- */
+    const tree = (kind, x, y) => { if (clear(x, y)) m.trees.push({ x, y, kind, s: R.range(.85, 1.2), seed: R.int(0, 1e6) }); };
+    for (const f of m.fields) if (f.kind === 'olive') {
+      const c = Math.cos(f.rot), s = Math.sin(f.rot);
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      for (const [x, y] of f.pts) { const a = x * c + y * s, b = -x * s + y * c; x0 = Math.min(x0, a); x1 = Math.max(x1, a); y0 = Math.min(y0, b); y1 = Math.max(y1, b); }
+      for (let b = y0 + 3.5; b < y1 - 2; b += 7) for (let a = x0 + 3 + ((b - y0) / 7 & 1) * 3; a < x1 - 2; a += 6.5) {
+        const x = a * c - b * s + R.range(-.6, .6), y = a * s + b * c + R.range(-.6, .6);
+        if (inPoly(f.pts, x, y) && polyEdgeDist(f.pts, x, y) > 1.8) tree('olive', x, y);
       }
     }
+    for (const tl of def.treelines || []) {
+      const p = pts(tl.pts), gap = tl.gap || 5;
+      for (let i = 0; i < p.length - 1; i++) {
+        const [ax, ay] = p[i], [bx, by] = p[i + 1], n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / gap));
+        for (let k = i ? 1 : 0; k <= n; k++) tree(tl.kind || 'cypress', ax + (bx - ax) * k / n, ay + (by - ay) * k / n);
+      }
+    }
+    for (const t of def.trees || []) tree(t.kind || 'olive', t.x, t.y);
     for (const t of m.trees) {
       const r = t.kind === 'olive' ? 2 : 1;
       for (let y = Math.floor(t.y - r); y <= Math.ceil(t.y + r); y++) for (let x = Math.floor(t.x - r); x <= Math.ceil(t.x + r); x++)
@@ -206,11 +191,7 @@ const MAP = (() => {
     }
 
     /* ---- craters: light cover ---- */
-    for (let i = 0; i < 24; i++) {
-      const x = R.range(30, 170), y = R.range(30, 170);
-      if (y < x || !clear(x, y)) continue;
-      const c = { x, y, r: R.range(1.6, 2.8) }; m.craters.push(c); m.craters.push({ ...c, x: y, y: x });
-    }
+    for (const c of def.craters || []) m.craters.push({ x: c.x, y: c.y, r: c.r || 2 });
     for (const c of m.craters) stampCrater(m, c);
 
     /* ---- roads are open ground (no cover), as on CoH3's Italian maps, where negative cover is rare. The 'negative'
@@ -516,6 +497,76 @@ const MAP = (() => {
     return out.length ? out : [{ x: e.x, y: e.y }];
   }
 
-  return { PIECE_M, WORN, pieceAt, pieceFrac, coversIn, hurtPiece, breakCover, hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, mainRegion, removeCover, stampCover, stampCrater, BI, BV, BL };
+
+  /* ---- checking a map: is it playable, and how fair are the two halves? (map editor and game/test/maps.js) ---- */
+  /* walking (or driving) distance in metres from (x, y) to every cell: Dijkstra over the 8-connected nav grid */
+  function distField(m, x, y, vehicle) {
+    const nav = navGrids(m), grid = vehicle ? nav.veh : nav.inf, W = m.w, n = W * m.h, D = new Float32Array(n).fill(Infinity);
+    const s = nearestOpen(grid, m, x, y), si = (s.y | 0) * W + (s.x | 0), heap = new U.Heap();
+    D[si] = 0; heap.push(0, si);
+    while (heap.size) {
+      const i = heap.pop(), cx = i % W, cy = (i / W) | 0, d = D[i];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = cx + dx, ny = cy + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= m.h) continue;
+        const j = ny * W + nx; if (grid[j]) continue;
+        if (dx && dy && (grid[cy * W + nx] || grid[ny * W + cx])) continue;   // no cutting corners
+        const nd = d + (dx && dy ? 1.414 : 1);
+        if (nd < D[j]) { D[j] = nd; heap.push(nd, j); }
+      }
+    }
+    return D;
+  }
+  /* nearest reachable distance to anywhere within r of (x, y) */
+  function distTo(m, D, x, y, r) {
+    let best = Infinity;
+    for (let yy = Math.floor(y - r); yy <= Math.ceil(y + r); yy++) for (let xx = Math.floor(x - r); xx <= Math.ceil(x + r); xx++)
+      if (xx >= 0 && yy >= 0 && xx < m.w && yy < m.h && (xx + .5 - x) ** 2 + (yy + .5 - y) ** 2 <= r * r) best = Math.min(best, D[yy * m.w + xx]);
+    return best;
+  }
+  function check(m, def) {
+    const problems = [], warn = [], at = (x, y) => `(${Math.round(x)}, ${Math.round(y)})`;
+    if (m.bases.length < 2) { problems.push('the map needs two bases'); return { problems, warn, sides: [] }; }
+    if (!m.points.some(p => p.type === 'victory')) problems.push('the map has no victory point');
+    for (const b of m.bases) if (Math.min(b.x, b.y, m.w - b.x, m.h - b.y) < 18) problems.push(`base at ${at(b.x, b.y)} is closer than 18 m to the map edge`);
+    if (def) for (const h of def.houses || []) if (!HOUSE_ART[Math.max(h.w, h.d) + 'x' + Math.min(h.w, h.d)]) problems.push(`house at ${at(h.x, h.y)}: no farmhouse art is ${h.w} x ${h.d} m`);
+    for (const h of m.houses) {
+      if (h.pit) continue;
+      let onRoad = false;
+      for (let y = Math.floor(h.y - h.d / 2); y < Math.ceil(h.y + h.d / 2) && !onRoad; y++) for (let x = Math.floor(h.x - h.w / 2); x < Math.ceil(h.x + h.w / 2); x++) if (x >= 0 && y >= 0 && x < m.w && y < m.h && m.road[y * m.w + x] === 2) { onRoad = true; break; }
+      if (onRoad) problems.push(`house at ${at(h.x, h.y)} stands on a road`);
+      for (const o of m.houses) if (o.id > h.id && !o.pit && Math.abs(o.x - h.x) < (o.w + h.w) / 2 + 1 && Math.abs(o.y - h.y) < (o.d + h.d) / 2 + 1) problems.push(`houses at ${at(h.x, h.y)} and ${at(o.x, o.y)} overlap`);
+      for (const p of m.points) if (Math.abs(p.x - h.x) < h.w / 2 + p.radius - 1 && Math.abs(p.y - h.y) < h.d / 2 + p.radius - 1) warn.push(`house at ${at(h.x, h.y)} is inside a point's circle`);
+      for (const b of m.bases) if (U.dist2(h.x, h.y, b.x, b.y) < 34 * 34) problems.push(`house at ${at(h.x, h.y)} is inside a base (keep 34 m from the HQ)`);
+    }
+    for (const c of m.covers) if (c.alive && (c.kind === 'wall' || c.kind === 'hedge')) for (const b of m.bases) if (U.segDist2(b.x, b.y, c.ax, c.ay, c.bx, c.by) < 30 * 30) { problems.push(`a ${c.kind} at ${at(c.ax, c.ay)} is inside a base (keep 30 m from the HQ)`); break; }
+    for (const p of m.points) for (const q of m.points) if (q.id > p.id && U.dist2(p.x, p.y, q.x, q.y) < (p.radius + q.radius + 4) ** 2) problems.push(`points at ${at(p.x, p.y)} and ${at(q.x, q.y)} are too close`);
+    // reach and distances from each HQ, on foot and by vehicle
+    const F = m.bases.map(b => ({ inf: distField(m, b.x, b.y, false), veh: distField(m, b.x, b.y, true) }));
+    const sides = m.bases.map(() => ({ points: [], near: { standard: 0, munitions: 0, fuel: 0, victory: 0 } }));   // near: points clearly nearer this base
+    for (const p of m.points) {
+      const d = F.map(f => ({ inf: distTo(m, f.inf, p.x, p.y, p.radius), veh: distTo(m, f.veh, p.x, p.y, p.radius) }));
+      d.forEach((x, i) => {
+        if (!isFinite(x.inf)) problems.push(`${p.type} point at ${at(p.x, p.y)}: infantry from base ${i + 1} cannot reach it`);
+        else if (!isFinite(x.veh)) problems.push(`${p.type} point at ${at(p.x, p.y)}: vehicles from base ${i + 1} cannot reach it`);
+        sides[i].points.push({ id: p.id, type: p.type, inf: x.inf, veh: x.veh });
+      });
+      if (isFinite(d[0].inf) && isFinite(d[1].inf) && Math.abs(d[0].inf - d[1].inf) > .08 * (d[0].inf + d[1].inf) / 2) sides[d[0].inf < d[1].inf ? 0 : 1].near[p.type]++;   // a point about as far from both is contested
+    }
+    if (isFinite(distTo(m, F[0].veh, m.bases[1].x, m.bases[1].y, 6)) === false) problems.push('vehicles cannot drive from one base to the other');
+    // fairness: per side, the walk to its nearest point of each kind and to every victory point
+    const sum = (a) => a.reduce((s, x) => s + x, 0);
+    for (const S of sides) {
+      S.nearest = {}; for (const t of ['standard', 'munitions', 'fuel', 'victory']) { const ds = S.points.filter(p => p.type === t).map(p => p.inf).sort((a, b) => a - b); S.nearest[t] = ds.length ? ds[0] : null; }
+      S.vpWalk = sum(S.points.filter(p => p.type === 'victory').map(p => p.inf));
+    }
+    const diff = (a, b) => Math.abs(a - b) / Math.max(1, (a + b) / 2);
+    for (const t of ['munitions', 'fuel', 'victory']) if (sides[0].nearest[t] != null && diff(sides[0].nearest[t], sides[1].nearest[t]) > .2) warn.push(`nearest ${t} point: ${Math.round(sides[0].nearest[t])} m walk for base 1, ${Math.round(sides[1].nearest[t])} m for base 2`);
+    if (diff(sides[0].vpWalk, sides[1].vpWalk) > .12) warn.push(`walk to all victory points: ${Math.round(sides[0].vpWalk)} m for base 1, ${Math.round(sides[1].vpWalk)} m for base 2`);
+    for (const t of ['standard', 'munitions', 'fuel', 'victory']) if (sides[0].near[t] !== sides[1].near[t]) warn.push(`${t} points nearer each base: ${sides[0].near[t]} vs ${sides[1].near[t]}`);
+    return { problems: [...new Set(problems)], warn: [...new Set(warn)], sides };
+  }
+
+  return { check, distField, HOUSE_ART, ROAD_HALF, inPoly, polyEdgeDist, PIECE_M, WORN, pieceAt, pieceFrac, coversIn, hurtPiece, breakCover, hAt, terrainClear, smokeBlocks, inSmoke, houseAt, collapseHouse, create, coverAt, coversNear, los, sectorAt, findPath, navGrids, walkable, lineClear, clearRun, pathOpen, nearestOpen, mainRegion, removeCover, stampCover, stampCrater, BI, BV, BL };
 })();
 if (typeof module !== 'undefined') module.exports = MAP;

@@ -46,5 +46,10 @@ or the published game will not have it.
   `tools/build_scenery.py` into `art/scenery/`; a new house footprint in `game/src/map.js` needs a variant there and in
   `HOUSE_ART`. Base buildings (`models/bases.py`): `tools/build_bases.py` into `art/bases/` (stages build33, build66, normal,
   damaged; flag recoloured per player); design review: `tools/review_bases.py`.
+- **Maps are data.** `game/src/maps.js` holds each map as a definition (bases, points, roads and tracks, field polygons,
+  houses, walls, hedges, trees, hills, craters), the same format the in-game map editor (`game/src/editor.js`, main menu >
+  Map editor) loads, saves and exports as JSON. `MAP.create` builds the playable map from one; `MAP.check` reports what
+  would break it and how fair the halves are. A map the owner sends from the editor goes into `maps.js` as it is, then
+  gets tidied. `game/test/maps.js` must pass for every map.
 - **Game code lives in `game/`.** Numbers go in `game/src/data.js` with their source (CoH3 game data where a counterpart
   exists, `standIn` where not); `data/units.json` stays the art roster. Keep the PC and phone layouts both working.

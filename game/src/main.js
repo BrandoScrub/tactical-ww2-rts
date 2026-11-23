@@ -5,7 +5,7 @@
 const MAIN = (() => {
   const ART = (window.ART_BASE || '../art/');
   let G = null, BG = null, lib = {}, layout = null, assets = null, inMenu = true, last = 0, acc = 0, hudT = 0, mmT = 0, fogT = -1, fogSlot = 0, speed = 1, side = 'us';
-  let screen = 'boot', back = 'main', ready = false, mode = 'skirmish';
+  let screen = 'boot', back = 'main', ready = false, mode = 'skirmish', mapDef = null;   // mapDef: the map to play (null: MAPS.default)
   const $ = s => document.querySelector(s);
   const CINE = { selected: new Set(), hover: null, noFog: true, cinematic: true };
 
@@ -24,7 +24,7 @@ const MAIN = (() => {
   /* ---------------- screens ---------------- */
   function show(name) {
     screen = name;
-    for (const id of ['boot', 'mainmenu', 'skirmish', 'howto', 'settings', 'deploy', 'pausemenu', 'end']) $('#' + id).classList.toggle('hide', id !== (name === 'main' ? 'mainmenu' : name));
+    for (const id of ['boot', 'mainmenu', 'skirmish', 'howto', 'settings', 'deploy', 'pausemenu', 'end', 'editor']) $('#' + id).classList.toggle('hide', id !== (name === 'main' ? 'mainmenu' : name));
     inMenu = name !== 'game';
     document.body.classList.toggle('menus', !G || name === 'main' || name === 'skirmish' || name === 'howto' || (name === 'settings' && back !== 'pausemenu'));
   }
@@ -69,15 +69,17 @@ const MAIN = (() => {
 
   /* ---------------- a match ---------------- */
   /* mode: 'skirmish' (1v1 against the AI), 'sandbox' (the same with 10,000 of everything, for testing)
-     or 'spectate' (AI against AI, no orders; fog off to start, the bar under the score turns it on for either side) */
-  function start(s, m) {
+     or 'spectate' (AI against AI, no orders; fog off to start, the bar under the score turns it on for either side).
+     map: a map definition (from the editor) or a name in MAPS; left out, the last one played (Play again). */
+  function start(s, m, map) {
     if (!ready) return;
-    side = s || side; mode = m || mode;
+    side = s || side; mode = m || mode; if (map !== undefined) mapDef = map;
+    const mapName = mapDef ? (typeof mapDef === 'string' ? MAPS[mapDef].name : mapDef.name || 'Custom map') : MAPS[MAPS.default].name;
     const spec = mode === 'spectate';
-    show('deploy'); $('#deploy p').textContent = spec ? 'AI against AI · Farm valley, Italy 1944' : (side === 'us' ? 'US Forces' : 'Wehrmacht') + (mode === 'sandbox' ? ' · Sandbox' : '') + ' · Farm valley, Italy 1944';
+    show('deploy'); $('#deploy p').textContent = (spec ? 'AI against AI' : (side === 'us' ? 'US Forces' : 'Wehrmacht') + (mode === 'sandbox' ? ' · Sandbox' : '')) + ' · ' + mapName + ', Italy 1944';
     speed = +set.speed || 1;
     setTimeout(() => {   // one frame for the overlay to show
-      G = SIM.create({ seed: 7, playerSide: side, crewLayout: layout, mode });
+      G = SIM.create({ seed: 7, playerSide: side, crewLayout: layout, mode, map: mapDef || undefined });
       document.body.classList.toggle('spectate', spec);
       window.G = G; acc = 0; fogT = -1;
       const canvas = $('#view');
@@ -123,7 +125,7 @@ const MAIN = (() => {
     fpsN++; fpsT += dt; if (fpsT >= .5) { if (set.fps) $('#fps').textContent = Math.round(fpsN / fpsT) + ' fps · ' + (RENDER.isGL() ? 'WebGL' : '2D'); fpsN = 0; fpsT = 0; }
     if (!G) {
       // menu backdrop: the battlefield, drifting; drawn at half rate to spare phones
-      if (!BG || !ready || (slow ^= 1)) return;
+      if (!BG || !ready || screen === 'editor' || (slow ^= 1)) return;
       RENDER.cam.x += dt * 2 * 1.6; RENDER.cam.y -= dt * 2 * 1.6;
       if (RENDER.cam.x > 150) { RENDER.cam.x = 70; RENDER.cam.y = 150; }
       RENDER.frame(BG, CINE, 1);
@@ -193,14 +195,22 @@ const MAIN = (() => {
 
   document.addEventListener('DOMContentLoaded', () => {
     const on = (id, f) => $(id).addEventListener('click', f);
-    const skirmish = m => { mode = m; $('#sk-mode').textContent = m === 'sandbox' ? 'Sandbox: you start with 10,000 manpower, munitions and fuel. The AI plays normally.' : ''; $('#sk-mode').style.display = m === 'sandbox' ? '' : 'none'; $('#skirmish h2').textContent = m === 'sandbox' ? 'Sandbox' : 'Skirmish'; show('skirmish'); };
+    const skirmish = m => { mode = m; $('#sk-mode').textContent = m === 'sandbox' ? 'Sandbox: you start with 10,000 manpower, munitions and fuel. The AI plays normally.' : ''; $('#sk-mode').style.display = m === 'sandbox' ? '' : 'none'; $('#skirmish h2').textContent = m === 'sandbox' ? 'Sandbox' : 'Skirmish'; mapList(); show('skirmish'); };
+    const mapList = () => {
+      const sel = $('#mapsel'), keep = sel.value;
+      sel.innerHTML = Object.keys(MAPS).filter(k => k !== 'default').map(k => `<option value="${k}">${MAPS[k].name}</option>`).join('')
+        + (EDITOR.hasSaved() ? `<option value="editor">${(EDITOR.current().name || 'My map').replace(/</g, '')} (map editor)</option>` : '');
+      if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+    };
     on('#mm-skirmish', () => skirmish('skirmish'));
     on('#mm-sandbox', () => skirmish('sandbox'));
-    on('#mm-watch', () => start('us', 'spectate'));
+    on('#mm-watch', () => start('us', 'spectate', null));
     on('#mm-howto', () => show('howto'));
     on('#mm-settings', () => { back = 'main'; show('settings'); });
-    on('#start', () => start('us', mode));
-    on('#start2', () => start('de', mode));
+    on('#mm-editor', () => { show('editor'); EDITOR.open(); });
+    const pickedMap = () => { const v = $('#mapsel').value; return v === 'editor' ? EDITOR.current() : v; };
+    on('#start', () => start('us', mode, pickedMap()));
+    on('#start2', () => start('de', mode, pickedMap()));
     document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => show(b.dataset.back === 'auto' ? back : b.dataset.back)));
     on('#resume', () => menu(false));
     on('#p-settings', () => { back = 'pausemenu'; show('settings'); });
@@ -217,5 +227,5 @@ const MAIN = (() => {
     last = performance.now(); requestAnimationFrame(loop);
     boot();
   });
-  return { menu, inMenu: () => inMenu, start, screen: () => screen, speed: () => speed, setSpeed: x => { speed = x; } };
+  return { menu, inMenu: () => inMenu, start, toMain, screen: () => screen, speed: () => speed, setSpeed: x => { speed = x; } };
 })();

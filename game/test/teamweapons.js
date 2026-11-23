@@ -6,14 +6,16 @@
 //   AI:      men killed by MGs and mortars, squads pinned by MGs, sandbag pieces lost and re-laid
 const path = require('path'), fs = require('fs');
 const src = p => path.join(__dirname, '..', 'src', p);
-global.U = require(src('util.js')); global.DATA = require(src('data.js')); global.MAP = require(src('map.js'));
+global.U = require(src('util.js')); global.DATA = require(src('data.js')); global.MAPS = require(src('maps.js')); global.MAP = require(src('map.js'));
 global.FOG = require(src('fog.js')); global.COMBAT = require(src('combat.js')); global.SIM = require(src('sim.js')); global.AI = require(src('ai.js'));
 const layout = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'art', 'crew_layout.json')));
 const games = +(process.argv[2] || 4), mins = +(process.argv[3] || 16);
 let problems = 0;
 const fail = msg => { problems++; console.log('PROBLEM: ' + msg); };
 const alive = e => e.models.filter(m => m.alive).length;
-function world(seed) { const G = SIM.create({ seed, crewLayout: layout }); G.players.forEach(P => { P.res.mp = 1e5; P.res.mu = 1e5; P.res.fu = 1e5; }); return G; }
+// the set-piece tests below need flat open ground to shoot across: a bare firing range with the usual two bases
+const RANGE = { id: 'range', name: 'Firing range', w: 200, h: 200, swell: 0, pointBags: false, bases: MAPS[MAPS.default].bases, points: [{ type: 'victory', x: 100, y: 100 }] };
+function world(seed) { const G = SIM.create({ seed, crewLayout: layout, map: RANGE }); G.players.forEach(P => { P.res.mp = 1e5; P.res.mu = 1e5; P.res.fu = 1e5; }); return G; }
 // a row of open ground, clear of cover and sight blockers, from x0 to x1
 function openRow(G, x0, x1) {
   for (let y = 20; y < 180; y += 2) {

@@ -32,6 +32,7 @@ const RENDER = (() => {
     'field_stubble_alt', 'field_ploughed', 'ground_olive_grove', 'crater_earth'];
   const TILE_M = { _: 6, ground_white_road: 6.4, ground_white_road_alt: 6.4, field_ploughed: 7, field_stubble: 6, field_wheat: 5 };
   const ROAD_W = 5.6;                       // gravel width in metres (the old stand-in's middle stroke)
+  const TRACK_W = 3.6;                      // dirt farm track width in metres
   R.tiles = {};
   function loadGround(base) {
     return Promise.all(GROUND_TILES.map(n => new Promise(res => {
@@ -157,8 +158,9 @@ const RENDER = (() => {
     // the roads that leave the map carry on out of it, along their last stretch
     const road = tile('ground_white_road', Math.round((TILE_M.ground_white_road || TILE_M._) * S));
     if (road) {
-      g.strokeStyle = road; g.lineWidth = 5.6 * S; g.lineCap = 'butt';
-      for (const rd of m.roads) for (const [a, b] of [[rd[0], rd[1]], [rd[rd.length - 1], rd[rd.length - 2]]]) {
+      g.strokeStyle = road; g.lineCap = 'butt';
+      for (const { kind, pts: rd } of m.roads) for (const [a, b] of [[rd[0], rd[1]], [rd[rd.length - 1], rd[rd.length - 2]]]) {
+        g.lineWidth = (kind === 'track' ? TRACK_W : ROAD_W) * S;
         if (Math.min(a[0], a[1], m.w - a[0], m.h - a[1]) > 20) continue;                 // ends inside the map
         const dx = a[0] - b[0], dy = a[1] - b[1], L = Math.hypot(dx, dy);
         g.beginPath(); g.moveTo((b[0] + P) * S, (b[1] + P) * S); g.lineTo((a[0] + dx / L * 200 + P) * S, (a[1] + dy / L * 200 + P) * S); g.stroke();
@@ -215,30 +217,41 @@ const RENDER = (() => {
     // 3. fields: each kind's tile in its rotated plot, rows along the plot, a darker worn margin round it
     const FIELD = { wheat: ['field_wheat', 1], stubble: ['field_stubble', 1], ploughed: ['field_ploughed', 1], green: ['ground_green_grass', 1],
                     olive: ['ground_olive_grove', .9] };   // a little dry grass shows through under the olives
+    const polyPath = (ctx, P) => { ctx.beginPath(); P.forEach(([x, y], i) => i ? ctx.lineTo(x * S, y * S) : ctx.moveTo(x * S, y * S)); ctx.closePath(); };
     for (const f of m.fields) {
       const [n, a] = FIELD[f.kind] || []; const p = n && pat(n);
-      g.save(); g.translate(f.x * S, f.y * S); g.rotate(f.rot);
-      const w = f.w * S, h = f.h * S;
-      if (p) { g.globalAlpha = a; g.fillStyle = p; g.fillRect(-w / 2, -h / 2, w, h); g.globalAlpha = 1; }
-      g.strokeStyle = 'rgba(70,56,32,.35)'; g.lineWidth = .6 * S; g.strokeRect(-w / 2, -h / 2, w, h);
+      let cx = 0, cy = 0; for (const [x, y] of f.pts) { cx += x / f.pts.length; cy += y / f.pts.length; }
+      g.save(); polyPath(g, f.pts); g.clip();
+      if (p) { g.translate(cx * S, cy * S); g.rotate(f.rot); g.globalAlpha = a; g.fillStyle = p; const big = 160 * S; g.fillRect(-big, -big, 2 * big, 2 * big); g.globalAlpha = 1; }
       g.restore();
+      polyPath(g, f.pts); g.strokeStyle = 'rgba(70,56,32,.35)'; g.lineWidth = .6 * S; g.lineJoin = 'round'; g.stroke();
     }
     // 4. roads: a dusty shoulder, then the gravel laid segment by segment so the wheel ruts follow the road
+    //    Farm tracks: the same, narrower, in packed dirt (drawn first, so the gravel roads lie over their ends).
     const roadPat = [pat('ground_white_road'), pat('ground_white_road_alt')], rt = (TILE_M.ground_white_road) * S;
-    for (const rd of m.roads) {
+    const trackPat = [pat('ground_dirt'), pat('ground_dirt_alt')];
+    const order = m.roads.filter(r => r.kind === 'track').concat(m.roads.filter(r => r.kind !== 'track'));
+    let seg = 0;
+    for (const { kind, pts: rd } of order) {
+      const track = kind === 'track', RW = track ? TRACK_W : ROAD_W;
       g.lineCap = 'round'; g.lineJoin = 'round';
       g.beginPath(); rd.forEach(([x, y], i) => i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S));
-      g.strokeStyle = 'rgba(150,128,92,.45)'; g.lineWidth = (ROAD_W + 2.4) * S; g.stroke();
-      g.strokeStyle = 'rgba(196,180,150,.9)'; g.lineWidth = (ROAD_W + .3) * S; g.stroke();   // joins and bends under the gravel
-    }
-    let seg = 0;
-    for (const rd of m.roads) for (let i = 0; i < rd.length - 1; i++, seg++) {
-      const [ax, ay] = rd[i], [bx, by] = rd[i + 1], L = Math.hypot(bx - ax, by - ay) * S, hw = ROAD_W * S / 2;
+      g.strokeStyle = track ? 'rgba(110,86,56,.4)' : 'rgba(150,128,92,.45)'; g.lineWidth = (RW + (track ? 1.6 : 2.4)) * S; g.stroke();
+      g.strokeStyle = track ? 'rgba(150,120,84,.9)' : 'rgba(196,180,150,.9)'; g.lineWidth = (RW + .3) * S; g.stroke();   // joins and bends under the gravel
+      for (let i = 0; i < rd.length - 1; i++, seg++) {
+      const [ax, ay] = rd[i], [bx, by] = rd[i + 1], L = Math.hypot(bx - ax, by - ay) * S, hw = RW * S / 2;
       g.save(); g.translate(ax * S, ay * S); g.rotate(Math.atan2(by - ay, bx - ax));
       g.beginPath(); g.rect(-hw * .35, -hw, L + hw * .7, 2 * hw); g.clip();
       g.translate(seg * 97 % rt, -rt / 2);                   // centre the tile's ruts on the road; vary where each segment starts
-      g.fillStyle = roadPat[seg % 3 === 2 ? 1 : 0] || roadPat[0]; g.fillRect(-rt - hw, 0, L + 2 * rt + 2 * hw, rt);
+      const pp = track ? trackPat : roadPat;
+      if (track) { g.globalAlpha = .85; g.translate(0, rt / 2 - hw); }
+      g.fillStyle = pp[seg % 3 === 2 ? 1 : 0] || pp[0]; g.fillRect(-rt - hw, 0, L + 2 * rt + 2 * hw, track ? 2 * hw + 2 : rt);
+      if (track) {                                              // two wheel ruts along the lane
+        g.globalAlpha = .28; g.fillStyle = '#4a3820'; g.fillRect(-hw, hw * .45, L + 2 * hw, .35 * S); g.fillRect(-hw, hw * 1.55 - .35 * S, L + 2 * hw, .35 * S);
+      }
+      g.globalAlpha = 1;
       g.restore();
+      }
     }
     R.ground = c;
   }
@@ -259,21 +272,24 @@ const RENDER = (() => {
     // fields
     const fcol = { wheat: ['#c8a85c', '#b8964a'], stubble: ['#b39a62', '#a08850'], green: ['#7f8a46', '#6e7a3c'], ploughed: ['#8a6a46', '#79593a'], olive: ['#8b8752', '#7d7946'] };
     for (const f of m.fields) {
-      g.save(); g.translate(f.x * S, f.y * S); g.rotate(f.rot);
-      const [c1, c2] = fcol[f.kind]; g.globalAlpha = .55; g.fillStyle = c1; g.fillRect(-f.w * S / 2, -f.h * S / 2, f.w * S, f.h * S);
-      g.globalAlpha = .35; g.strokeStyle = c2; g.lineWidth = 3;
-      for (let k = -f.h * S / 2 + 6; k < f.h * S / 2; k += 10) { g.beginPath(); g.moveTo(-f.w * S / 2, k); g.lineTo(f.w * S / 2, k); g.stroke(); }
+      const [c1, c2] = fcol[f.kind] || fcol.green;
+      const path = () => { g.beginPath(); f.pts.forEach(([x, y], i) => i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S)); g.closePath(); };
+      g.save(); path(); g.clip(); g.globalAlpha = .55; g.fillStyle = c1; g.fill();
+      let cx = 0, cy = 0; for (const [x, y] of f.pts) { cx += x / f.pts.length; cy += y / f.pts.length; }
+      g.translate(cx * S, cy * S); g.rotate(f.rot); g.globalAlpha = .35; g.strokeStyle = c2; g.lineWidth = 3;
+      for (let k = -100 * S; k < 100 * S; k += 10) { g.beginPath(); g.moveTo(-100 * S, k); g.lineTo(100 * S, k); g.stroke(); }
       g.restore();
     }
     g.globalAlpha = 1;
     // roads: dusty white gravel with wheel ruts
-    for (const rd of m.roads) {
+    for (const { kind, pts: rd } of m.roads) {
+      const q = kind === 'track' ? TRACK_W / ROAD_W : 1;
       g.lineCap = 'round'; g.lineJoin = 'round';
       const path = () => { g.beginPath(); rd.forEach(([x, y], i) => i ? g.lineTo(x * S, y * S) : g.moveTo(x * S, y * S)); };
-      path(); g.strokeStyle = 'rgba(120,104,72,.55)'; g.lineWidth = 7.4 * S; g.stroke();
-      path(); g.strokeStyle = '#c9b48a'; g.lineWidth = 5.6 * S; g.stroke();
-      path(); g.strokeStyle = 'rgba(150,128,90,.55)'; g.lineWidth = 3.4 * S; g.setLineDash([]); g.stroke();
-      path(); g.strokeStyle = '#d4c197'; g.lineWidth = 2.2 * S; g.stroke();
+      path(); g.strokeStyle = 'rgba(120,104,72,.55)'; g.lineWidth = 7.4 * q * S; g.stroke();
+      path(); g.strokeStyle = q < 1 ? '#9c7d56' : '#c9b48a'; g.lineWidth = 5.6 * q * S; g.stroke();
+      path(); g.strokeStyle = 'rgba(150,128,90,.55)'; g.lineWidth = 3.4 * q * S; g.setLineDash([]); g.stroke();
+      path(); g.strokeStyle = q < 1 ? '#a88a62' : '#d4c197'; g.lineWidth = 2.2 * q * S; g.stroke();
     }
     // speckle
     const r = U.rng(5);

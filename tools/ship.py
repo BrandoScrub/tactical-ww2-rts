@@ -9,6 +9,7 @@ What it runs, in order (it stops at the first failure and says which):
   1. art engine pinned copy untouched      tools/update_artkit.py --verify
   2. every vehicle and crew weapon holds    tools/check.py                      TOTAL 0
      together, every map house has art     game/test/houses.js                 no problems
+     maps playable and balanced            game/test/maps.js                   maps ok
      queued orders, capture-point orders,  game/test/orders.js                 orders ok
      repairs, mortar and MG choices
      unit classes and squad-owned weapons  game/test/classes.js                no problems
@@ -20,6 +21,8 @@ What it runs, in order (it stops at the first failure and says which):
   5. the build in a browser, PC and phone   loads with no page errors and all its art, a skirmish starts as each side
   6. real input in the browser              game/test/flow.py de, game/test/mobile.py    no page errors
      Watch AI fog button and folding bar   game/test/spectate.py (PC and phone)          spectate ok
+     map editor: place, draw, move, erase,  game/test/editor.py (PC and phone)            editor ok
+     undo, check, files, play
 No local web server is needed: the browser is answered from the files on disk.
 """
 import asyncio, mimetypes, os, runpy, subprocess, sys, time
@@ -106,7 +109,7 @@ def input_stage():
     """The repo's real-input browser tests, each in its own process, answered from the repository folder."""
     good = True
     for script, args, ok in (('game/test/flow.py', ['de'], 'no page errors'), ('game/test/mobile.py', [], 'no page errors'),
-                             ('game/test/spectate.py', [], 'spectate ok')):
+                             ('game/test/spectate.py', [], 'spectate ok'), ('game/test/editor.py', [], 'editor ok')):
         good &= run(f'{script} {" ".join(args)}'.strip(), [sys.executable, __file__, '--offline', script] + args, ok=ok, timeout=900)
     return good
 
@@ -118,6 +121,7 @@ def main(args):
         lambda: run('art engine untouched', [sys.executable, 'tools/update_artkit.py', '--verify']),
         lambda: run('vehicles and crew weapons hold together', [sys.executable, 'tools/check.py'], ok='TOTAL 0'),
         lambda: run('every map house has art', ['node', 'game/test/houses.js'], ok='no problems'),
+        lambda: run('maps playable and balanced', ['node', 'game/test/maps.js'], ok='maps ok'),
         lambda: run('orders, repairs, mortar and MG choices', ['node', 'game/test/orders.js'], ok='orders ok'),
         lambda: run('unit classes and squad weapons', ['node', 'game/test/classes.js'], ok='no problems'),
         lambda: run('positions can be finished, AI answers armour', ['node', 'game/test/positions.js'], ok='positions ok'),

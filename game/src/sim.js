@@ -6,7 +6,7 @@ const SIM = (() => {
   const D = DATA;
 
   function create(opts) {
-    const map = MAP.create(opts.seed || 7);
+    const map = MAP.create(opts.seed || 7, opts.map);   // opts.map: a map definition or a name in MAPS (default MAPS.default)
     const G = {
       t: 0, mode: opts.mode || 'skirmish', spectate: opts.mode === 'spectate', map, ents: [], byId: new Map(), nextId: 1, projectiles: [], fx: [], events: [], over: null,
       players: [], layout: opts.crewLayout || null, rng: U.rng((opts.seed || 7) * 31 + 5),
