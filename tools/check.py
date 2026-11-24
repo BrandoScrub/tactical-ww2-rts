@@ -6,7 +6,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.ins
 import time
 import importlib
 bad = 0
-for mod in sys.argv[1:] or ['us_vehicles', 'de_vehicles', 'us_vehicles2', 'de_vehicles2', 'infantry']:
+for mod in sys.argv[1:] or ['us_vehicles', 'de_vehicles', 'us_vehicles2', 'de_vehicles2', 'new_vehicles', 'infantry']:
     V = importlib.import_module('models.' + mod)
     for role, name, fn in V.ALL:
         t = time.time(); m = fn(); iss = m.check(); bad += len(iss)
