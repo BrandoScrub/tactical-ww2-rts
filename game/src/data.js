@@ -39,7 +39,7 @@ const DATA = (() => {
     m2hb:     { name: 'M2HB .50 cal', type: 'vehicle_mg', dmg: 9, acc: [.55, .45, .35], rng: [7, 20, 35], rpm: [209, 209, 209], pen: [4, 3, 2], supp: .05, kind: 'small' },
     jeep30:   { name: '.30 cal', type: 'vehicle_mg', dmg: 4.5, acc: [.54, .435, .396], rng: [7, 20, 35], rpm: [362, 279, 254], pen: [2.25, 2.15, 2], supp: .04, kind: 'small' },
     mg42ht:   { name: 'MG 42', type: 'vehicle_mg', dmg: 5, acc: [.51, .36, .31], rng: [7, 20, 35], rpm: [431, 414, 414], pen: [1, 1, 1], supp: .05, kind: 'small' },
-    mg34car:  { name: 'MG 34', type: 'vehicle_mg', dmg: 3.6, acc: [.63, .66, .7], rng: [7, 20, 35], rpm: [590, 520, 480], pen: [2, 1.75, 1.5], supp: .05, kind: 'small' },
+    mg34car:  { name: 'MG 34', type: 'vehicle_mg', dmg: 3.6, acc: [.66, .55, .4], accNote: 'standIn 2026-11-24: falls off with range like every other MG (was .63/.66/.70, which made the scout car better than Grenadiers at 35 m)', rng: [7, 20, 35], rpm: [590, 520, 480], pen: [2, 1.75, 1.5], supp: .05, kind: 'small' },
     mg34bike: { name: 'MG 34', type: 'vehicle_mg', dmg: 3.6, acc: [.5, .4, .3], rng: [7, 20, 30], rpm: [500, 450, 400], pen: [2, 1.75, 1.5], supp: .04, arc: 70, kind: 'small', standIn: true },
     /* ---- anti-tank ---- */
     bazooka:  { name: 'M1A1 Bazooka', type: 'launcher', dmg: 60, acc: [.067, .05, .0363], rng: [10, 22.5, 35], rpm: [12.65, 12.31, 11.76], pen: [200, 125, 110], kind: 'at', infAcc: .2 },
@@ -47,11 +47,11 @@ const DATA = (() => {
     gun57:    { name: '57 mm M1', type: 'at_gun', dmg: 160, acc: [.067, .05, .0463], rng: [15, 35, 60], rpm: [12, 12, 11.7], pen: [300, 150, 120], arc: 66, setup: 2.5, teardown: 1.75, kind: 'at', aoe: 1, infAcc: .3 },
     pak40:    { name: '7.5 cm Pak 40', type: 'at_gun', dmg: 160, acc: [.075, .05, .0463], rng: [15, 35, 60], rpm: [11.43, 11.43, 11.16], pen: [380, 260, 130], arc: 66, setup: 2.5, teardown: 1.75, kind: 'at', aoe: 1, infAcc: .3 },
     /* ---- vehicle guns ---- */
-    sherman75:{ name: '75 mm M3', type: 'tank_gun', dmg: 120, acc: [.075, .0475, .04], rng: [15, 27.5, 40], rpm: [10, 10, 10], pen: [135, 123, 110], kind: 'cannon', aoe: 2.5, turret: true },
+    sherman75:{ name: '75 mm M3', type: 'tank_gun', dmg: 120, acc: [.075, .0475, .04], rng: [15, 27.5, 40], rpm: [10, 10, 10], pen: [135, 123, 110], kind: 'cannon', aoe: 3.2, turret: true, aoeNote: 'standIn 2026-11-24: bigger HE burst (was 2.5) so the Sherman is the anti-infantry tank and the Panzer IV the anti-armour one' },
     pz4_75:   { name: '7.5 cm KwK 40', type: 'tank_gun', dmg: 120, acc: [.075, .0475, .045], rng: [15, 27.5, 40], rpm: [12, 12, 12], pen: [200, 170, 140], kind: 'cannon', aoe: 2.5, turret: true },
     stug75:   { name: '7.5 cm StuK 40', type: 'tank_gun', dmg: 120, acc: [.1, .05, .04], rng: [15, 27.5, 40], rpm: [13.33, 13.33, 13.33], pen: [250, 200, 180], kind: 'cannon', aoe: 2.5, arc: 24 },
     m8_37:    { name: '37 mm M6', type: 'tank_gun', dmg: 80, acc: [.075, .0475, .035], rng: [10, 25, 40], rpm: [13.15, 13.15, 13.15], pen: [55, 45, 40], kind: 'cannon', aoe: 1.5, turret: true },
-    chaffee75:{ name: '75 mm M6', type: 'tank_gun', dmg: 120, acc: [.1, .05, .04], rng: [15, 27.5, 40], rpm: [12.63, 12.63, 12.63], pen: [120, 108, 95], kind: 'cannon', aoe: 2.5, turret: true },
+    chaffee75:{ name: '75 mm M6', type: 'tank_gun', dmg: 120, acc: [.1, .05, .04], rng: [15, 27.5, 40], rpm: [12.63, 12.63, 12.63], pen: [120, 108, 95], kind: 'cannon', aoe: 1.8, turret: true, aoeNote: 'standIn 2026-11-24: smaller burst (was 2.5) so the Chaffee hunts light vehicles and the Sherman is the infantry killer' },
     m10_76:   { name: '3-inch M7', type: 'tank_gun', dmg: 160, acc: [.075, .05, .045], rng: [15, 30, 50], rpm: [10, 10, 10], pen: [200, 180, 160], kind: 'cannon', aoe: 1.5, turret: true, standIn: true },
     pz2_20:   { name: '2 cm KwK 30', type: 'autocannon', dmg: 18, acc: [.06, .045, .035], rng: [10, 25, 40], rpm: [60, 60, 60], pen: [45, 35, 28], kind: 'cannon', aoe: .8, turret: true, standIn: true },
     /* ---- indirect ---- */
@@ -87,6 +87,8 @@ const DATA = (() => {
       cost: { mp: 270 }, pop: 8, time: 20, upkeep: 12, reinforce: 30, hp: 95, speed: 3.6, sight: 35, capture: 1.25,
       models: ['leader', 'rifleman', 'rifleman', 'rifleman', 'rifleman', 'rifleman'], weapons: ['thompson', 'garand', 'garand', 'garand', 'garand', 'garand'],
       vet: [900, 2700, 5400], vetBonus: [{ rAcc: .9 }, { acc: 1.25, rof: 1.1 }, { hp: 15, rAcc: .8, rof: 1.25 }],
+      // standIn 2026-11-24: Garand more accurate close (CoH3 .68 / .615 near / mid) so Riflemen win a close fight with Grenadiers and lose a long one
+      weaponStats: { garand: { acc: [.8, .64, .35] } },
       upgrades: [{ id: 'bar', name: 'M1918 BAR', cost: { mu: 60 }, time: 30, swap: { index: 1, sprite: 'lmg', weapon: 'bar' } }],
       abilities: ['fragGrenade', 'breach', 'smokeGrenade'] },
     us_mortar: { name: 'M2 Mortar Team', side: 'us', cls: 'light', role: 'Team Weapon / Light Artillery', glyph: 'mortar', standIn: 'CoH3 fields the 81 mm M1; our art is the 60 mm M2',
@@ -164,7 +166,7 @@ const DATA = (() => {
   /* Vehicles. armor = [front, side, rear]. `soft`: unarmoured or thin-skinned (critical threshold, can't crush cover). `turret` vehicles aim their main gun on their own. */
   const VEHICLES = {
     us_jeep: { name: '1/4-ton 4x4 Truck', side: 'us', cls: 'ultralight', art: 'us_scout', role: 'Light Vehicle / Recon', glyph: 'jeep',
-      cost: { mp: 220 }, pop: 4, time: 30, upkeep: 4, hp: 200, armor: [4.5, 4.25, 2.75], targetSize: 10.6, speed: 9.75, accel: 8.75, rot: 70, sight: 37.5,
+      cost: { mp: 220 }, pop: 4, time: 30, upkeep: 4, hp: 200, armor: [4.5, 4.25, 2.75], targetSize: 10.6, speed: 9.75, accel: 8.75, rot: 70, sight: 37.5, capture: 1.5,   // capture: owner's decision 2026-11-24 (CoH3's jeep can't); same rate as the motorcycle, standIn
       weapons: ['jeep30'], vet: [600, 1800, 3600], length: 3.4, width: 1.6, soft: true },
     us_halftrack: { name: 'M3 Armored Personnel Carrier', side: 'us', cls: 'light', art: 'us_half_track', role: 'Light Vehicle / Transport', glyph: 'halftrack',
       cost: { mp: 240, fu: 35 }, pop: 6, time: 60, upkeep: 9, hp: 300, armor: [7.5, 7, 5], targetSize: 16, speed: 7.2, accel: 2.5, rot: 60, sight: 35,

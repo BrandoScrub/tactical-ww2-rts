@@ -134,7 +134,7 @@ const MAIN = (() => {
     if (!inMenu && !HUD.ui.paused && !G.over) {
       acc += dt * speed;
       let n = 0;
-      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); if (G.spectate) AI.step(G, 0); SIM.step(G, SIM.DT); acc -= SIM.DT; }
+      while (acc >= SIM.DT && n++ < 8) { snap(G); AI.step(G, 1); if (G.spectate) AI.step(G, 0); else AI.assist(G, 0); SIM.step(G, SIM.DT); acc -= SIM.DT; }
       if (n > 8) acc = 0;
     }
     HUD.tick(dt);

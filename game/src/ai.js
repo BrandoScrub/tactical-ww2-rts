@@ -398,6 +398,171 @@ const AI = (() => {
     return true;
   }
 
+  /* Fighting range (own design; CoH3 players do it by hand). Every squad and vehicle fights from the distance where its
+     own weapons do most against its target compared with what the target and the enemies beside it do back, read from
+     the weapon profiles in data.js (COMBAT.unitDps): Riflemen and SMG squads close in on Grenadiers, Grenadiers and
+     snipers keep their distance, anti-tank guns and tank destroyers stand off at the edge of their reach.
+     It moves there only by a safe way. Danger zones: the fire lane of a set-up enemy machine gun (its arc and reach, where
+     it can see) for infantry; the reach of anything that goes through its armour for a vehicle. A spot in a zone, or a
+     way there through one, is ruled out unless it is where the unit already stands: it flanks round the side instead
+     (spots round the target at the chosen range, both ways), and if every way closer is covered it holds and calls for
+     help: smoke from a squad in throwing range, mortar smoke or shells on the gun, and a vehicle that can kill it.
+     Stand-in numbers (no CoH3 source): re-checked every 3 s; a move needs a gain of 1.2 on the 10-point scale. */
+  const RANGE = { every: 3, minGain: 1.2, lanePad: 10 * Math.PI / 180, laneExtra: 3, travel: .05, angles: [0, .4, -.4, .8, -.8, 1.3, -1.3], callFor: 12 };
+  /* where this unit must not walk into: machine-gun lanes for infantry, anti-tank reach for vehicles */
+  function dangerZones(G, e, visibleEnemies) {
+    const out = [];
+    for (const o of visibleEnemies) {
+      if (e.type === 'squad') {
+        if (o.type !== 'squad' || !COMBAT.isMg(o)) continue;
+        const w = SIM.weaponOf(o), c = o.crew;
+        out.push({ src: o, x: c.x, y: c.y, R: w.rng[2] + RANGE.laneExtra, face: c.heading, half: o.garrison != null ? Math.PI : (w.arc || 360) / 2 * Math.PI / 180 + RANGE.lanePad });
+      } else if (e.type === 'vehicle') {
+        let R = 0;
+        if (o.type === 'squad') {
+          for (const m of o.models) if (m.alive && m.weapon && D.W[m.weapon].kind === 'at' && D.W[m.weapon].pen[1] > e.def.armor[0] * .6) R = Math.max(R, D.W[m.weapon].rng[2]);
+          const cw = SIM.weaponOf(o);
+          if (cw && cw.kind === 'at' && cw.pen[1] > e.def.armor[0] * .6) { const up = o.crew.state !== 'packed'; out.push({ src: o, x: up ? o.crew.x : o.x, y: up ? o.crew.y : o.y, R: cw.rng[2] + RANGE.laneExtra, face: o.crew.heading, half: up ? (cw.arc || 360) / 2 * Math.PI / 180 + RANGE.lanePad : Math.PI }); continue; }
+        } else if (o.type === 'vehicle') for (const k of o.def.weapons) { const w = D.W[k]; if ((w.kind === 'cannon' || w.kind === 'at') && w.pen[1] > e.def.armor[0] * .6) R = Math.max(R, w.rng[2]); }
+        if (R) out.push({ src: o, x: o.x, y: o.y, R: R + RANGE.laneExtra, face: 0, half: Math.PI });
+      }
+    }
+    return out;
+  }
+  function inZone(G, z, x, y) {
+    const d2 = U.dist2(x, y, z.x, z.y); if (d2 > z.R * z.R) return false;
+    if (z.half < Math.PI && Math.abs(U.angNorm(Math.atan2(y - z.y, x - z.x) - z.face)) > z.half) return false;
+    return MAP.los(G.map, z.x, z.y, x, y);
+  }
+  /* how many steps of the straight way from (ax, ay) to (bx, by) lie in a zone the unit isn't already in */
+  function wayDanger(G, zones, ax, ay, bx, by, already) {
+    let n = 0;
+    for (const z of zones) { if (already.has(z)) continue; for (let i = 1; i <= 6; i++) if (inZone(G, z, ax + (bx - ax) * i / 6, ay + (by - ay) * i / 6)) { n++; break; } }
+    return n;
+  }
+  /* the best distance to fight target t from, and how good each distance is (0..10) */
+  function rangePlan(G, e, t, visibleEnemies) {
+    const maxR = COMBAT.maxRangeOf(e), side = visibleEnemies.filter(o => o !== t && U.dist2(o.x, o.y, t.x, t.y) < 20 * 20);
+    const theirs = d => COMBAT.unitDps(t, e, d) + side.reduce((a, o) => a + COMBAT.unitDps(o, e, d), 0);
+    // vehicles keep 12 m off: grenades, satchels and close anti-tank rockets live inside that (stand-in)
+    const d0 = e.type === 'vehicle' ? 12 : 4, ds = []; for (let d = d0; d <= maxR; d += 2.5) ds.push(d);
+    const mine = ds.map(d => COMBAT.unitDps(e, t, d)), top = Math.max(...mine, 0);
+    if (top <= 0) return null;
+    const ratio = ds.map((d, i) => mine[i] / (theirs(d) + top * .25));
+    const best = Math.max(...ratio);
+    // within 3% of the best: the farthest such distance (no need to stand closer than that)
+    let bd = ds[0]; for (let i = 0; i < ds.length; i++) if (ratio[i] >= best * .97) bd = ds[i];
+    const score = d => { if (d > maxR) return 0; if (d < d0 - 2) return 0; const i = Math.min(ds.length - 1, Math.max(0, Math.round((d - d0) / 2.5))); return ratio[i] / best * 10; };
+    return { d: bd, score, maxR };
+  }
+  /* the distance a unit type fights best from, for the unit card: against the other side's line infantry, or against its
+     medium tank for a unit whose weapons are anti-tank. A fresh, full-strength unit, nothing beside the target. */
+  const bestCache = {};
+  function bestRange(defId) {
+    if (bestCache[defId] !== undefined) return bestCache[defId];
+    const stub = id => { const d = SIM.unitDef(id); return D.SQUADS[id] ? { type: 'squad', defId: id, def: d, x: 0, y: 0, models: d.weapons.map((w, i) => ({ alive: true, weapon: d.crewWeapon && i === 0 ? null : w })), crew: d.crewWeapon ? { state: 'deployed' } : null } : { type: 'vehicle', defId: id, def: d, x: 0, y: 0 }; };
+    const def = SIM.unitDef(defId); if (!def) return null;
+    const foe = def.side === 'us' ? 'de' : 'us', me = stub(defId);
+    const inf = stub(foe + (foe === 'us' ? '_riflemen' : '_grenadiers')), tank = stub(foe + (foe === 'us' ? '_sherman' : '_pz4'));
+    const vsTank = COMBAT.unitDps(me, tank, 15) > COMBAT.unitDps(me, inf, 15) * 1.5;
+    const w = (def.crewWeapon ? [def.weapons[0]] : def.weapons).map(k => D.W[k]);
+    if (w.some(x => x && x.kind === 'indirect')) return (bestCache[defId] = { d: null, vs: 'indirect', what: 'artillery: 25 m and out, needs no sight line' });
+    const p = rangePlan(null, me, vsTank ? tank : inf, []);
+    return (bestCache[defId] = p && { d: p.d, vs: vsTank ? 'armour' : 'infantry' });
+  }
+  /* move a squad or vehicle to its best fighting distance by a safe way; true if it was given an order */
+  function engage(G, me, S, e, visibleEnemies, pts, resume) {
+    if (e.crew || e.retreating || e.garrison != null || e.order.type === 'attack' || e.order.type === 'build' || e.order.type === 'repair' || e.fixing) return false;
+    if (e.type === 'squad' && (e.suppState === 2 || !e.models.some(m => m.alive))) return false;
+    if ((e.rangeT || 0) > G.t) return false;
+    const maxR = COMBAT.maxRangeOf(e);
+    // the target: what this unit hurts most, nearer first
+    let t = null, ts = 0;
+    for (const o of visibleEnemies) {
+      const d = Math.hypot(o.x - e.x, o.y - e.y); if (d > maxR + 15) continue;
+      const v = COMBAT.unitDps(e, o, Math.min(d, maxR)) / (1 + d / 40); if (v > ts) { ts = v; t = o; }
+    }
+    if (!t) return false;
+    e.rangeT = G.t + RANGE.every;
+    const plan = rangePlan(G, e, t, visibleEnemies); if (!plan) return false;
+    const zones = dangerZones(G, e, visibleEnemies), already = new Set(zones.filter(z => inZone(G, z, e.x, e.y)));
+    const grid = e.type === 'vehicle' ? MAP.navGrids(G.map).veh : MAP.navGrids(G.map).inf;
+    // taking a point: stay inside its circle
+    const cap = (e.type === 'squad' || e.def.capture) && pts.find(p => p.owner !== me.slot && Math.hypot(p.x - e.x, p.y - e.y) < p.radius);
+    const cover = (x, y) => e.type !== 'squad' ? 0 : ({ heavy: 3, light: 1.5, negative: -2 }[MAP.coverAt(G.map, x, y, t.x, t.y)] || 0);
+    const d0 = Math.hypot(e.x - t.x, e.y - t.y);
+    const here = plan.score(d0) + (e.type === 'squad' ? ({ heavy: 3, light: 1.5, garrison: 3, negative: -2 }[COMBAT.squadCover(G, e)] || 0) : 0) - (already.size ? 4 : 0);
+    const away = Math.atan2(e.y - t.y, e.x - t.x);
+    let best = null, bs = here, blocked = 0, closer = 0;
+    const tries = [];
+    for (const r of [plan.d, plan.d - 4, plan.d + 4]) if (r >= 3 && r <= plan.maxR) for (const a of RANGE.angles) tries.push([r, away + a]);
+    // a cover spot near the best distance on the way
+    if (e.type === 'squad') for (const c of coverSpots(G, t.x + Math.cos(away) * plan.d, t.y + Math.sin(away) * plan.d, Math.atan2(t.y - e.y, t.x - e.x), 8, e.x, e.y)) tries.push([null, null, c.x, c.y]);
+    for (const [r, a, cx, cy] of tries) {
+      let x = cx != null ? cx : t.x + Math.cos(a) * r, y = cy != null ? cy : t.y + Math.sin(a) * r;
+      if (x < 2 || y < 2 || x > G.map.w - 2 || y > G.map.h - 2) continue;
+      if (!MAP.walkable(grid, G.map, x, y)) { const q = MAP.nearestOpen(grid, G.map, x, y); if (Math.hypot(q.x - x, q.y - y) > 3) continue; x = q.x; y = q.y; }
+      if (cap && Math.hypot(x - cap.x, y - cap.y) > cap.radius - 1) continue;
+      if (!MAP.los(G.map, x, y, t.x, t.y)) continue;
+      const d = Math.hypot(x - t.x, y - t.y), trav = Math.hypot(x - e.x, y - e.y);
+      if (trav < 4) continue;
+      const inside = zones.some(z => !already.has(z) && inZone(G, z, x, y));
+      let via = null, way = !inside && wayDanger(G, zones, e.x, e.y, x, y, already);
+      // the straight way crosses a lane: go round outside the gun's reach, on the spot's side of it
+      if (way) for (const z of zones) {
+        if (already.has(z)) continue;
+        const a = Math.atan2(y - z.y, x - z.x), q = MAP.nearestOpen(grid, G.map, U.clamp(z.x + Math.cos(a) * (z.R + 4), 2, G.map.w - 2), U.clamp(z.y + Math.sin(a) * (z.R + 4), 2, G.map.h - 2));
+        if (!zones.some(o => !already.has(o) && inZone(G, o, q.x, q.y)) && !wayDanger(G, zones, e.x, e.y, q.x, q.y, already) && !wayDanger(G, zones, q.x, q.y, x, y, already)) { via = q; way = 0; break; }
+      }
+      if (d < d0 - 3) { closer++; if (inside || way) blocked++; }
+      if (inside || way) continue;   // never into a lane or across one on purpose
+      const sc = plan.score(d) + cover(x, y) - (via ? Math.hypot(via.x - e.x, via.y - e.y) + Math.hypot(x - via.x, y - via.y) : trav) * RANGE.travel;
+      if (sc > bs + RANGE.minGain) { bs = sc; best = { x, y, via }; }
+    }
+    // every way closer is covered by a gun: hold, and ask for smoke, shells or a vehicle on it
+    if (closer && blocked === closer && plan.d < d0 - 3) {
+      const z = zones.filter(z => z.src.type === 'squad').sort((a, b) => U.dist2(a.x, a.y, e.x, e.y) - U.dist2(b.x, b.y, e.x, e.y))[0];
+      if (z) S.call = { id: z.src.id, until: G.t + RANGE.callFor };
+    }
+    if (!best) return false;
+    if (best.via) { SIM.issue(G, [e.id], { type: 'move', x: best.via.x, y: best.via.y }); SIM.issue(G, [e.id], { type: 'move', x: best.x, y: best.y, face: Math.atan2(t.y - best.y, t.x - best.x) }, true); e.rangeT = G.t + RANGE.every * 3; }
+    else SIM.issue(G, [e.id], { type: 'move', x: best.x, y: best.y, face: Math.atan2(t.y - best.y, t.x - best.x) });
+    if (resume) SIM.issue(G, [e.id], resume, true);
+    return true;
+  }
+  /* a gun pinning our approach was called out: smoke it, shell it, send a vehicle that can kill it */
+  function answerCall(G, me, S, units) {
+    const c = S.call; if (!c || c.until < G.t) { S.call = null; return; }
+    const mg = G.byId.get(c.id);
+    if (!mg || mg.dead || !FOG.visible(G, me.slot, mg)) { S.call = null; return; }
+    const at = mg.crew && mg.crew.state !== 'packed' ? mg.crew : mg;
+    if (!(MAP.inSmoke(G.map, at.x, at.y)) && (c.smokeT || 0) < G.t) {
+      const sm = units.find(f => f.type === 'squad' && !f.retreating && f.def.abilities && f.def.abilities.includes('smokeGrenade') && (f.cooldowns.smokeGrenade || 0) < G.t && me.res.mu >= 15 && U.dist2(f.x, f.y, at.x, at.y) < 24 * 24)
+        || (me.res.mu >= 40 && units.find(f => f.crew && f.crew.state === 'deployed' && f.def.abilities && f.def.abilities.includes('smokeBarrage') && (f.cooldowns.smokeBarrage || 0) < G.t && U.dist2(f.crew.x, f.crew.y, at.x, at.y) < 85 * 85 && U.dist2(f.crew.x, f.crew.y, at.x, at.y) > 30 * 30));
+      if (sm) { SIM.issue(G, [sm.id], { type: 'ability', id: sm.crew ? 'smokeBarrage' : 'smokeGrenade', x: at.x, y: at.y }); c.smokeT = G.t + 15; }
+    }
+    const mo = units.find(f => f.crew && f.crew.state === 'deployed' && f.def.abilities && f.def.abilities.includes('barrage') && (f.cooldowns.barrage || 0) < G.t && U.dist2(f.crew.x, f.crew.y, at.x, at.y) < (D.ABILITIES.barrage.range - 2) ** 2 && U.dist2(f.crew.x, f.crew.y, at.x, at.y) > (D.ABILITIES.barrage.minRange + 2) ** 2);
+    if (mo) SIM.issue(G, [mo.id], { type: 'ability', id: 'barrage', x: at.x, y: at.y });
+    if (!c.sent) {
+      const v = units.filter(f => f.type === 'vehicle' && !f.fixing && !f.def.reinforces && COMBAT.unitDps(f, mg, 25) > 0 && U.dist2(f.x, f.y, at.x, at.y) < 70 * 70)
+        .sort((a, b) => COMBAT.unitDps(b, mg, 25) - COMBAT.unitDps(a, mg, 25))[0];
+      if (v) { SIM.issue(G, [v.id], { type: 'attack', target: mg.id }); c.sent = v.id; }
+    }
+  }
+  /* the player's own units on attack-move settle at their best range too, then carry on to where they were sent */
+  function assist(G, slot) {
+    const S = (G.ai || (G.ai = {}))['p' + slot] || (G.ai['p' + slot] = {}), me = G.players[slot];
+    if ((S.t || 0) > G.t) return;
+    S.t = G.t + 1;
+    const vis = G.ents.filter(o => !o.dead && o.owner === 1 - slot && o.type !== 'building' && FOG.visible(G, slot, o));
+    if (!vis.length) return;
+    for (const e of G.ents) {
+      if (e.dead || e.owner !== slot || e.type === 'building') continue;
+      const am = e.order.type === 'attackMove' ? e.order : e.order.type === 'move' && e.engaged && e.queue && e.queue[0] && e.queue[0].type === 'attackMove' ? e.queue[0] : null;
+      if (!am) continue;
+      if (engage(G, me, S, e, vis, G.map.points, { type: 'attackMove', x: am.x, y: am.y })) e.engaged = true;
+    }
+  }
   function command(G, me, mine, S) {
     const slot = me.slot, enemy = 1 - slot, pts = G.map.points;
     const hq = SIM.hqOf(G, slot); if (!hq) return;
@@ -419,6 +584,7 @@ const AI = (() => {
     const canCapture = e => e.type === 'squad' || !!e.def.capture;
     for (const g of goals) g.takers = units.filter(e => canCapture(e) && !e.retreating && (U.dist2(e.x, e.y, g.p.x, g.p.y) < (g.p.radius + 4) ** 2 ||
       e.order && e.order.x != null && U.dist2(e.order.x, e.order.y, g.p.x, g.p.y) < (g.p.radius + 4) ** 2)).length;
+    answerCall(G, me, S, units);
     for (const e of units) {
       // pull back when losing
       if (e.type === 'squad') {
@@ -520,6 +686,8 @@ const AI = (() => {
         const v = G.ents.find(v => !v.dead && v.type === 'vehicle' && v.owner < 0 && U.dist2(v.x, v.y, e.x, e.y) < 25 * 25 && FOG.seen(G, slot, v.x, v.y) && !visibleEnemies.some(o => U.dist2(o.x, o.y, v.x, v.y) < 15 * 15));
         if (v) { SIM.issue(G, [e.id], { type: 'recrew', target: v.id }); continue; }
       }
+      // fight from the best distance, by a safe way
+      if (e.type !== 'vehicle' || !e.def.reinforces) { if (engage(G, me, S, e, visibleEnemies, pts)) continue; }
       // a garrison mostly holds its house
       if (e.garrison != null && G.rng() > .04) continue;
       // caught in the open in a fight: take the nearest cover across the line of fire (CoH3 players do this all game)
@@ -600,6 +768,6 @@ const AI = (() => {
       SIM.issue(G, [e.id], { type: e.crew ? 'move' : 'attackMove', x: tx, y: ty, face: toward });
     }
   }
-  return { step, mgPlan, approach, repairSpot };
+  return { step, assist, engage, bestRange, rangePlan, dangerZones, inZone, mgPlan, approach, repairSpot };
 })();
 if (typeof module !== 'undefined') module.exports = AI;
