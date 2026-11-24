@@ -420,6 +420,136 @@
    "span": 360
   }
  },
+ "cache_us": {
+  "src": "props/cache_us_back.png",
+  "frame": [
+   112,
+   51
+  ],
+  "anchor": [
+   56,
+   38
+  ],
+  "headings": 8,
+  "span": 360,
+  "front": {
+   "src": "props/cache_us_front.png",
+   "frame": [
+    112,
+    65
+   ],
+   "anchor": [
+    56,
+    36
+   ],
+   "headings": 8,
+   "span": 360
+  }
+ },
+ "cache_de": {
+  "src": "props/cache_de_back.png",
+  "frame": [
+   103,
+   58
+  ],
+  "anchor": [
+   52,
+   38
+  ],
+  "headings": 8,
+  "span": 360,
+  "front": {
+   "src": "props/cache_de_front.png",
+   "frame": [
+    103,
+    61
+   ],
+   "anchor": [
+    52,
+    36
+   ],
+   "headings": 8,
+   "span": 360
+  }
+ },
+ "bunker_de": {
+  "src": "props/bunker_de_back.png",
+  "frame": [
+   195,
+   128
+  ],
+  "anchor": [
+   98,
+   84
+  ],
+  "headings": 8,
+  "span": 360,
+  "front": {
+   "src": "props/bunker_de_front.png",
+   "frame": [
+    195,
+    134
+   ],
+   "anchor": [
+    98,
+    84
+   ],
+   "headings": 8,
+   "span": 360
+  }
+ },
+ "gunpit_us": {
+  "src": "props/gunpit_us_back.png",
+  "frame": [
+   219,
+   97
+  ],
+  "anchor": [
+   110,
+   63
+  ],
+  "headings": 8,
+  "span": 360,
+  "front": {
+   "src": "props/gunpit_us_front.png",
+   "frame": [
+    220,
+    98
+   ],
+   "anchor": [
+    110,
+    42
+   ],
+   "headings": 8,
+   "span": 360
+  }
+ },
+ "gunpit_de": {
+  "src": "props/gunpit_de_back.png",
+  "frame": [
+   228,
+   97
+  ],
+  "anchor": [
+   114,
+   65
+  ],
+  "headings": 8,
+  "span": 360,
+  "front": {
+   "src": "props/gunpit_de_front.png",
+   "frame": [
+    229,
+    121
+   ],
+   "anchor": [
+    115,
+    63
+   ],
+   "headings": 8,
+   "span": 360
+  }
+ },
  "olive_0": {
   "src": "props/olive_0.png",
   "frame": [

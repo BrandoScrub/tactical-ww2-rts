@@ -661,7 +661,8 @@ const RENDER = (() => {
       c.fillStyle = '#2c2822'; c.beginPath(); c.ellipse(sx, sy, h.w / 3 * 31 * k, h.w / 3 * 15.5 * k, 0, 0, U.TAU); c.fill();
     }
     c.globalAlpha = 1;
-    if (front && h.occ != null) {
+    if (front) pitMarks(G, c, h, k, sx, sy);
+    if (front && h.occ != null && !h.gun) {
       const o = G.byId.get(h.occ);
       if (o && !o.dead && FOG.shown(G, o)) {
         const bx = h.x - Math.cos(h.face) * h.w * .42, by = h.y - Math.sin(h.face) * h.w * .42;
@@ -669,6 +670,22 @@ const RENDER = (() => {
         c.strokeStyle = '#ddd'; c.lineWidth = 1.5 * k; c.beginPath(); c.moveTo(px, py); c.lineTo(qx, qy); c.stroke();
         c.fillStyle = TEAM[o.owner]; c.fillRect(qx, qy, 11 * k, 7 * k);
       }
+    }
+  }
+  /* what a field work is for, over it: a bunker's conversion (red cross, wrench, MG) and the work on one; health
+     for a while after it is hit */
+  function pitMarks(G, c, h, k, sx, sy) {
+    if (h.built < 1) return;
+    const [ex, ey] = toScreen(h.x, h.y, h.roofed ? 3.2 : 2.2), r = 7 * k;
+    const badge = draw => { c.fillStyle = 'rgba(15,15,15,.78)'; c.beginPath(); c.arc(ex, ey, r * 1.25, 0, U.TAU); c.fill(); draw(); };
+    if (h.role === 'medical') badge(() => { c.fillStyle = '#fff'; c.fillRect(ex - r * .8, ey - r * .8, r * 1.6, r * 1.6); c.fillStyle = '#d02a2a'; c.fillRect(ex - r * .22, ey - r * .65, r * .44, r * 1.3); c.fillRect(ex - r * .65, ey - r * .22, r * 1.3, r * .44); });
+    else if (h.role === 'repair') badge(() => { c.strokeStyle = '#ffd36a'; c.lineWidth = 2.2 * k; c.beginPath(); c.moveTo(ex - r * .6, ey + r * .6); c.lineTo(ex + r * .3, ey - r * .3); c.stroke(); c.beginPath(); c.arc(ex + r * .45, ey - r * .45, r * .35, 0, U.TAU); c.stroke(); });
+    else if (h.role === 'mg') badge(() => { c.fillStyle = '#e8e8e8'; c.fillRect(ex - r * .8, ey - r * .12, r * 1.6, r * .3); c.fillRect(ex - r * .2, ey - r * .12, r * .25, r * .7); });
+    if (h.converting) { const f = h.converting.t / DATA.BUNKER[h.converting.role].time; c.strokeStyle = '#5aa6ff'; c.lineWidth = 3 * k; c.beginPath(); c.arc(ex, ey, r * 1.5, -Math.PI / 2, -Math.PI / 2 + U.TAU * f); c.stroke(); }
+    if (h.hp < h.maxHp * .98 && (h.cache || h.bunker || h.gun) && G.t - (h.hitT || -99) < 8) {
+      const f = Math.max(0, h.hp / h.maxHp), w = h.w * 9 * k, [bx, by] = toScreen(h.x, h.y, (h.roofed ? 3.2 : 2.2) + 1.2);
+      c.fillStyle = 'rgba(0,0,0,.6)'; c.fillRect(bx - w / 2 - 1, by - 1, w + 2, 5 * k + 2);
+      c.fillStyle = f < .3 ? '#e04a3a' : f < .6 ? '#e0b43a' : '#5bd16a'; c.fillRect(bx - w / 2, by, w * f, 5 * k);
     }
   }
   /* Farmhouses: the artkit sprites (art/scenery/, tools/build_scenery.py) in three stages: intact, 'damaged' under 60%
@@ -1034,7 +1051,7 @@ const RENDER = (() => {
   function memOf(obj) { let m = R.mem.get(obj); if (!m) R.mem.set(obj, m = {}); return m; }
   function drawSquadParts(G, sq, k, list, shadows) {
     const pitH = sq.garrison != null && G.map.houses[sq.garrison] && G.map.houses[sq.garrison].pit ? G.map.houses[sq.garrison] : null;
-    if (sq.garrison != null && !pitH) return;   // inside a house: the house shows the flag, muzzle flashes show at the windows
+    if (sq.garrison != null && (!pitH || pitH.roofed)) return;   // inside a house or a bunker: it shows the flag, muzzle flashes show at the windows
     const sink = pitH ? -.45 : 0;               // in a fighting position the men stand in the dug pit
     const side = G.players[sq.owner].side, alive = sq.models.filter(m => m.alive);
     const deployed = sq.crew && sq.crew.state !== 'packed';
@@ -1340,6 +1357,8 @@ const RENDER = (() => {
     else if (p.type === 'munitions') { for (let i = -1; i <= 1; i++) c.fillRect(sx + i * 4 * s - 1.2 * s, sy - 5 * s, 2.4 * s, 10 * s); }
     else if (p.type === 'fuel') { c.fillRect(sx - 4 * s, sy - 5 * s, 8 * s, 10 * s); c.fillStyle = '#222'; c.fillRect(sx - 2 * s, sy - 3 * s, 4 * s, 2 * s); }
     else { c.fillRect(sx - 4 * s, sy - 4 * s, 8 * s, 8 * s); }
+    // a resource cache on it: a small crate mark, and it can't be taken while the cache stands
+    if (p.locked) { c.fillStyle = '#c99a5a'; c.strokeStyle = '#222'; c.lineWidth = 1 * s; c.fillRect(sx + 6 * s, sy + 5 * s, 8 * s, 6 * s); c.strokeRect(sx + 6 * s, sy + 5 * s, 8 * s, 6 * s); }
     // held but cut off from its owner's supply: a red slash, and under the full-size icon a NO INCOME tag
     const m = R.G && R.G.map, cut = p.owner >= 0 && m && m.sectors[p.sector] && !m.sectors[p.sector].supplied;
     if (cut) {
@@ -1351,7 +1370,8 @@ const RENDER = (() => {
       }
     }
     if (G) {
-      const v = DATA.ECON.point[p.type], pay = (v.mu ? '+' + v.mu + ' munitions ' : '') + (v.fu ? '+' + v.fu + ' fuel' : '');
+      const ch = p.locked ? G.map.houses[p.cache] : null, kk = ch ? 1 + DATA.DEFENCES[ch.defId].bonus : 1, v0 = DATA.ECON.point[p.type], v = { mu: Math.round(v0.mu * kk * 10) / 10, fu: Math.round(v0.fu * kk * 10) / 10 };
+      const pay = (v.mu ? '+' + v.mu + ' munitions ' : '') + (v.fu ? '+' + v.fu + ' fuel' : '') + (ch ? ' (cache: +50%, can\'t be captured)' : '');
       const txt = cut ? 'Cut off from supply: no income (' + pay.trim() + ' when connected)' + (p.type === 'victory' ? '  victory point still counts' : '') : pay + (p.type === 'victory' ? '  victory point' : '');
       c.font = '600 12px Inter, system-ui, sans-serif'; const w = c.measureText(txt).width;
       c.fillStyle = 'rgba(40,24,14,.85)'; c.fillRect(sx + 16, sy - 9, w + 10, 18); c.fillStyle = '#ffd9a8'; c.fillText(txt, sx + 21, sy + 4);

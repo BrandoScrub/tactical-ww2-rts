@@ -6,10 +6,12 @@ const AI = (() => {
   const D = DATA;
   /* unit wishes by phase: [unit, weight]; tech follows FACTIONS[side].buildings */
   const PLAN = {
-    de: { early: [['de_grenadiers', 3], ['de_hmg', 2.2], ['de_mortar', 1.2], ['de_pioneers', .4], ['de_bike', .5]], mid: [['de_grenadiers', 2], ['de_hmg', 1.2], ['de_mortar', 1.2], ['de_schreck', 1.5], ['de_222', 2], ['de_pz2', 1.5], ['de_panzergrenadiers', 2], ['de_at_gun', 1.2], ['de_stug', 2], ['de_251', .4], ['de_sniper', .5]], late: [['de_pz4', 3], ['de_stug', 2], ['de_panzergrenadiers', 2], ['de_grenadiers', 1.5], ['de_at_gun', 1], ['de_pz2', 1]] },
-    us: { early: [['us_riflemen', 3], ['us_hmg', 2], ['us_mortar', 1.2], ['us_engineers', .4], ['us_jeep', .6]], mid: [['us_riflemen', 2], ['us_hmg', 1.2], ['us_mortar', 1.2], ['us_bazooka', 1.5], ['us_m8', 2], ['us_at_gun', 1.2], ['us_halftrack', .4], ['us_sniper', .5], ['us_chaffee', 1.5]], late: [['us_sherman', 3], ['us_m10', 2], ['us_riflemen', 2], ['us_at_gun', 1], ['us_bazooka', 1]] },
+    de: { early: [['de_grenadiers', 3], ['de_hmg', 2.2], ['de_mortar', 1.2], ['de_pioneers', .4], ['de_bike', .5]], mid: [['de_grenadiers', 2], ['de_hmg', 1.2], ['de_mortar', 1.2], ['de_schreck', 1.5], ['de_222', 2], ['de_pz2', 1.5], ['de_panzergrenadiers', 2], ['de_at_gun', 1.2], ['de_stug', 2], ['de_251', .4], ['de_sniper', .5]], late: [['de_pz4', 3], ['de_panther', 2], ['de_tiger', .8], ['de_stoss', 1.5], ['de_stug', 2], ['de_panzergrenadiers', 1.5], ['de_grenadiers', 1.5], ['de_at_gun', 1], ['de_pz2', 1]] },
+    us: { early: [['us_riflemen', 3], ['us_hmg', 2], ['us_mortar', 1.2], ['us_engineers', .4], ['us_jeep', .6], ['us_scouts', .5]], mid: [['us_riflemen', 2], ['us_hmg', 1.2], ['us_mortar', 1.2], ['us_bazooka', 1.5], ['us_m8', 2], ['us_at_gun', 1.2], ['us_halftrack', .4], ['us_sniper', .5], ['us_chaffee', 1.5], ['us_stuart', 1.2]], late: [['us_sherman', 3], ['us_m10', 2], ['us_pershing', 1.2], ['us_riflemen', 2], ['us_at_gun', 1], ['us_bazooka', 1]] },
   };
-  const CAP = { de_bike: 1, us_jeep: 1, de_mortar: 2, us_mortar: 2, de_hmg: 2, us_hmg: 2, de_sniper: 1, us_sniper: 1, de_251: 1, us_halftrack: 1 };
+  /* a house or field work a squad can go into: not a cache, a gun pit or a converted bunker */
+  const holdable = h => !h.noGarrison && !h.role;
+  const CAP = { de_tiger: 1, us_pershing: 1, de_stoss: 2, us_scouts: 1, de_bike: 1, us_jeep: 1, de_mortar: 2, us_mortar: 2, de_hmg: 2, us_hmg: 2, de_sniper: 1, us_sniper: 1, de_251: 1, us_halftrack: 1 };
   /* fighting vehicles (fuel cost, not a transport) wanted before teching to tier 3 and 4: without this the AI saved its
      fuel for the next building for the whole game and never fielded a vehicle */
   const VEH_BEFORE_TECH = [0, 0, 1, 2];
@@ -39,7 +41,7 @@ const AI = (() => {
     if ((S.manT || 0) < G.t) {
       S.manT = G.t + 3;
       for (const h of G.map.houses) {
-        if (!h.pit || h.dead || h.built < 1 || h.occ != null || h.owner !== me.slot || mine.some(e => e.order && e.order.type === 'garrison' && e.order.house === h.id)) continue;
+        if (!h.pit || h.dead || h.built < 1 || h.occ != null || h.owner !== me.slot || !holdable(h) || mine.some(e => e.order && e.order.type === 'garrison' && e.order.house === h.id)) continue;
         const free = e => e.type === 'squad' && !e.retreating && e.garrison == null && !e.def.builder && e.order.type !== 'attack' && e.suppState < 2;
         const near = (e, r) => U.dist2(e.x, e.y, h.x, h.y) < r * r;
         // machine guns take positions through mgPlan (only one that watches the way in); riflemen man the rest, and only
@@ -50,6 +52,7 @@ const AI = (() => {
       }
     }
     patchGaps(G, me, mine, S);
+    fixWorks(G, me, mine, S);
     if (G.t < FORT.from || (S.fortT || 0) > G.t) return;
     S.fortT = G.t + FORT.every;
     // a position left half dug (its diggers retreated or died): a free builder goes back and finishes it
@@ -60,10 +63,11 @@ const AI = (() => {
       if (b) SIM.issue(G, [b.id], { type: 'build', what: half.defId, x: half.x, y: half.y });
       return;                                              // no new one while one is still open
     }
+    if (fieldWorks(G, me, mine, S)) return;
     const id = me.side + '_position', def = D.DEFENCES[id]; if (!def) return;
     const b = mine.find(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type !== 'build' && e.order.type !== 'repair' && !e.buildQueue.length && !e.fortQueue && G.t - e.lastHit > 5);
     if (!b || me.res.mp < (def.cost.mp || 0) + FORT.spare) return;
-    const pits = G.map.houses.filter(h => h.pit && !h.dead && h.owner === me.slot);
+    const pits = G.map.houses.filter(h => h.pit && !h.dead && h.owner === me.slot && (h.defId === id || h.bunker));
     if (pits.length >= FORT.maxPits[me.side]) return;
     const hq = SIM.hqOf(G, me.slot), foe = SIM.hqOf(G, 1 - me.slot); if (!hq || !foe) return;
     const held = G.map.points.filter(p => p.owner === me.slot && !pits.some(h => U.dist2(h.x, h.y, p.x, p.y) < 20 * 20) && Math.hypot(p.x - hq.x, p.y - hq.y) < 90)
@@ -93,6 +97,67 @@ const AI = (() => {
         return;
       }
     }
+  }
+
+  /* Caches, a bunker and a howitzer (CoH3 players fortify and dig in as the match goes on). One thing per pass, only with
+     money the army and the tech don't need: a cache on a resource point well behind the front; for the Germans a Concrete
+     Bunker by a held point, turned into an MG 42 bunker when munitions allow; once the tier-3 building stands, one
+     howitzer emplacement behind the HQ facing the enemy. All stand-ins for how players use them. */
+  const WORKS = { cacheFrom: 300, cacheMax: 2, cacheSpare: 90, howFrom: 480, howFuSpare: 40, bunkerFrom: 240, bunkerSpare: 120, mgMu: 100 };
+  function fieldWorks(G, me, mine, S) {
+    const side = me.side, hq = SIM.hqOf(G, me.slot), foe = SIM.hqOf(G, 1 - me.slot); if (!hq || !foe) return false;
+    const free = mine.filter(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type === 'idle' && !e.buildQueue.length && !e.fortQueue && G.t - e.lastHit > 6);
+    const near = (b, x, y) => free.slice().sort((a, c) => U.dist2(a.x, a.y, x, y) - U.dist2(c.x, c.y, x, y))[0];
+    if (!free.length) return false;
+    const works = G.map.houses.filter(h => h.pit && !h.dead && h.owner === me.slot);
+    // a bunker of ours not yet converted: an MG 42 in it with munitions to spare
+    const bk = works.find(h => h.bunker && h.built >= 1 && !h.role && !h.converting && h.occ == null);
+    if (bk && me.res.mu >= WORKS.mgMu) { SIM.issue(G, [near(null, bk.x, bk.y).id], { type: 'convert', house: bk.id, role: 'mg' }); return true; }
+    // one howitzer emplacement once its building stands
+    const howId = side + '_howitzer_pit', hd = D.DEFENCES[howId];
+    if (hd && G.t > WORKS.howFrom && me.built.has(hd.req) && !works.some(h => h.defId === howId) && me.res.mp >= hd.cost.mp + 60 && me.res.fu >= hd.cost.fu + WORKS.howFuSpare) {
+      const away = Math.atan2(foe.y - hq.y, foe.x - hq.x);
+      for (const r of [22, 28, 34, 18]) for (const off of [0, .5, -.5, 1, -1]) {
+        const x = hq.x + Math.cos(away + off) * r, y = hq.y + Math.sin(away + off) * r;
+        if (SIM.canPit(G, me.slot, howId, x, y)) continue;
+        const S2 = MAP.sectorAt(G.map, x, y); if (S2.owner !== me.slot) continue;
+        SIM.issue(G, [near(null, x, y).id], { type: 'build', what: howId, x, y, face: Math.atan2(foe.y - y, foe.x - x) }); return true;
+      }
+    }
+    // a cache on a resource point well behind the front
+    const cId = side + '_cache', cd = D.DEFENCES[cId];
+    if (cd && G.t > WORKS.cacheFrom && works.filter(h => h.cache).length < WORKS.cacheMax && me.res.mp >= cd.cost.mp + WORKS.cacheSpare) {
+      const p = G.map.points.filter(p => p.owner === me.slot && p.type !== 'victory' && !SIM.liveCache(G, p) && G.map.sectors[p.sector].supplied && Math.hypot(p.x - hq.x, p.y - hq.y) < Math.hypot(p.x - foe.x, p.y - foe.y) * .9 && !SIM.canPit(G, me.slot, cId, p.x, p.y))
+        .sort((a, b) => Math.hypot(a.x - hq.x, a.y - hq.y) - (a.type !== 'standard' ? 40 : 0) - Math.hypot(b.x - hq.x, b.y - hq.y) + (b.type !== 'standard' ? 40 : 0))[0];   // resource points first
+      if (p) { SIM.issue(G, [near(null, p.x, p.y).id], { type: 'build', what: cId, x: p.x, y: p.y }); return true; }
+    }
+    // the Germans: one Concrete Bunker by the held point nearest the enemy that is still close to home
+    const bId = side + '_bunker', bd = D.DEFENCES[bId];
+    if (bd && G.t > WORKS.bunkerFrom && !works.some(h => h.bunker) && me.res.mp >= bd.cost.mp + WORKS.bunkerSpare) {
+      const held = G.map.points.filter(p => p.owner === me.slot && Math.hypot(p.x - hq.x, p.y - hq.y) < 95).sort((a, c) => Math.hypot(a.x - foe.x, a.y - foe.y) - Math.hypot(c.x - foe.x, c.y - foe.y));
+      const gun = D.W.mg42bunker, R = gun.rng[2] * .9, arcHalf = gun.arc / 2 * Math.PI / 180;
+      for (const p of held.slice(0, 2)) {
+        const route = approach(G, me.slot, p), ahead = Math.atan2(foe.y - p.y, foe.x - p.x);
+        let pick = null;
+        for (const off of [0, .6, -.6, 1.1, -1.1]) for (const r of [p.radius + 5, p.radius + 8]) {
+          const a = ahead + off, x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r;
+          if (SIM.canPit(G, me.slot, bId, x, y)) continue;
+          const v = routeView(G, route, x, y, R, arcHalf, false); if (!v || v.watch <= 0) continue;
+          const sc = v.watch - Math.abs(off) * .5; if (!pick || sc > pick.sc) pick = { x, y, face: v.face, sc };
+        }
+        if (pick) { SIM.issue(G, [near(null, pick.x, pick.y).id], { type: 'build', what: bId, x: pick.x, y: pick.y, face: pick.face }); return true; }
+      }
+    }
+    return false;
+  }
+  /* our bunkers, caches and gun pits that took damage: a free builder patches them up when it is quiet */
+  function fixWorks(G, me, mine, S) {
+    if ((S.worksT || 0) > G.t) return; S.worksT = G.t + 8;
+    const h = G.map.houses.find(h => h.pit && !h.dead && h.owner === me.slot && h.built >= 1 && (h.cache || h.bunker || h.gun) && h.hp < h.maxHp * .8 && G.t - (h.hitT || -99) > 12 &&
+      !mine.some(e => e.order && e.order.type === 'repair' && e.order.house === h.id));
+    if (!h) return;
+    const b = mine.filter(e => e.type === 'squad' && e.def.builder && !e.retreating && e.order.type === 'idle' && !e.buildQueue.length && G.t - e.lastHit > 8).sort((a, c) => U.dist2(a.x, a.y, h.x, h.y) - U.dist2(c.x, c.y, h.x, h.y))[0];
+    if (b && U.dist2(b.x, b.y, h.x, h.y) < 90 * 90) SIM.issue(G, [b.id], { type: 'repair', house: h.id });
   }
 
   /* Broken sandbag lines: when it is quiet, an idle builder re-lays the pieces shells and tanks knocked out of our own
@@ -342,7 +407,7 @@ const AI = (() => {
     const mid = route[Math.min(route.length - 1, 6)], toward = Math.atan2(mid.y - p.y, mid.x - p.x);
     const cands = coverSpots(G, p.x, p.y, toward, p.radius + MG.search).map(c => ({ x: c.x, y: c.y, cover: c.cover, kind: 'spot' }));
     for (const h of G.map.houses) {
-      if (h.dead || (h.occ != null && h.occ !== e.id) || h.built < 1 || U.dist2(h.x, h.y, p.x, p.y) >= (p.radius + MG.search) ** 2) continue;
+      if (h.dead || !holdable(h) || (h.occ != null && h.occ !== e.id) || h.built < 1 || U.dist2(h.x, h.y, p.x, p.y) >= (p.radius + MG.search) ** 2) continue;
       cands.push({ x: h.x, y: h.y, cover: 'garrison', kind: h.pit ? 'pit' : 'house', h });
     }
     cands.push({ x: p.x - Math.cos(toward) * 6, y: p.y - Math.sin(toward) * 6, cover: 'none', kind: 'spot' });
@@ -549,6 +614,22 @@ const AI = (() => {
       if (v) { SIM.issue(G, [v.id], { type: 'attack', target: mg.id }); c.sent = v.id; }
     }
   }
+  /* A howitzer shells (it never fires on its own): a set-up machine gun or other team weapon first, then a garrison or
+     squad dug in for a few seconds, then a stopped vehicle, then an enemy bunker, gun pit or cache in sight; never
+     closer than 12 m to our own men. The enemy works are what the CoH3 AI uses its artillery on too. */
+  function emplacementFire(G, me, e, vis) {
+    const ab = (e.def.abilities || [])[0], A = ab && D.ABILITIES[ab]; if (!A || (e.cooldowns[ab] || 0) > G.t || e.barrage) return;
+    const at = e.crew, inReach = (x, y) => { const d = Math.hypot(x - at.x, y - at.y); return d < A.range - 3 && d > (A.minRange || 0) + 3; };
+    const friendly = (x, y) => G.ents.some(o => !o.dead && o.owner === me.slot && o.type !== 'building' && o !== e && U.dist2(o.x, o.y, x, y) < 12 * 12);
+    let best = null, bs = 1e9;
+    for (const o of vis) {
+      if (!inReach(o.x, o.y) || friendly(o.x, o.y)) continue;
+      const sc = o.type === 'vehicle' ? (o.speed > 1 ? null : 40) : o.retreating || o.moving ? null : COMBAT.isMg(o) ? 0 : COMBAT.isTeam(o) ? 10 : o.garrison != null ? 15 : (o.coverT || 0) >= COMBAT.MORTAR.dugIn ? 25 : (o.stillT || 0) >= 6 ? 35 : null;
+      if (sc != null && sc < bs) { bs = sc; best = o; }
+    }
+    if (!best) for (const h of G.map.houses) if (h.pit && !h.dead && h.owner === 1 - me.slot && h.built >= 1 && FOG.seen(G, me.slot, h.x, h.y) && inReach(h.x, h.y) && !friendly(h.x, h.y)) { best = h; break; }
+    if (best) SIM.issue(G, [e.id], { type: 'ability', id: ab, x: best.x, y: best.y });
+  }
   /* the player's own units on attack-move settle at their best range too, then carry on to where they were sent */
   function assist(G, slot) {
     const S = (G.ai || (G.ai = {}))['p' + slot] || (G.ai['p' + slot] = {}), me = G.players[slot];
@@ -586,6 +667,7 @@ const AI = (() => {
       e.order && e.order.x != null && U.dist2(e.order.x, e.order.y, g.p.x, g.p.y) < (g.p.radius + 4) ** 2)).length;
     answerCall(G, me, S, units);
     for (const e of units) {
+      if (e.type === 'squad' && e.def.emplaced) { emplacementFire(G, me, e, visibleEnemies); continue; }
       // pull back when losing
       if (e.type === 'squad') {
         const al = e.models.filter(m => m.alive).length;
@@ -688,6 +770,11 @@ const AI = (() => {
       }
       // fight from the best distance, by a safe way
       if (e.type !== 'vehicle' || !e.def.reinforces) { if (engage(G, me, S, e, visibleEnemies, pts)) continue; }
+      // a tank or gun with nothing to fight near it shells an enemy cache, bunker or gun pit it can see
+      if (e.type === 'vehicle' && e.order.type !== 'attack' && D.W[e.def.weapons[0]].kind === 'cannon' && !visibleEnemies.some(o => U.dist2(o.x, o.y, e.x, e.y) < 45 * 45)) {
+        const h = G.map.houses.find(h => h.pit && !h.dead && h.owner === enemy && h.built >= 1 && (h.cache || h.bunker || h.gun) && FOG.seen(G, slot, h.x, h.y) && U.dist2(h.x, h.y, e.x, e.y) < 60 * 60);
+        if (h) { SIM.issue(G, [e.id], { type: 'attack', house: h.id }); continue; }
+      }
       // a garrison mostly holds its house
       if (e.garrison != null && G.rng() > .04) continue;
       // caught in the open in a fight: take the nearest cover across the line of fire (CoH3 players do this all game)
@@ -758,7 +845,7 @@ const AI = (() => {
       }
       // infantry sometimes hold the point from a house beside it
       if (e.type === 'squad' && !e.def.builder && !e.crew && G.rng() < .3) {
-        const h = G.map.houses.find(h => !h.dead && h.occ == null && !(h.built < 1) && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
+        const h = G.map.houses.find(h => !h.dead && holdable(h) && h.occ == null && !(h.built < 1) && U.dist2(h.x, h.y, p.x, p.y) < 14 * 14);
         if (h) { SIM.issue(G, [e.id], { type: 'garrison', house: h.id }); continue; }
       }
       // infantry stop behind cover near the point when there is some, rather than on open ground
