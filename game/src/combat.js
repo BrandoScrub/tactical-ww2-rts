@@ -485,6 +485,32 @@ const COMBAT = (() => {
     if (b.hp <= 0) { SIM.event(G, b.owner, 'lost', b.def.name + ' destroyed', b.x, b.y); SIM.kill(G, b); }
   }
 
-  return { BLAST, RANGING, MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
+  /* Expected damage per second of one weapon against a target at distance d, from its profile (accuracy, rate and
+     penetration at that range, the target's size and front armour), in the open. An estimate for choosing ranges and
+     targets: the shots themselves go through fireWeapon. Shells at infantry count a share of their blast. */
+  function weaponDps(w, t, d) {
+    if (!w || w.kind === 'indirect' || d > w.rng[2] || (w.minRange && d < w.minRange)) return 0;
+    const rpm = U.profile(w.rpm, w.rng, d) / 60, acc = U.profile(w.acc, w.rng, d), ts = t.def.targetSize || 1;
+    if (t.type === 'squad') {
+      if (w.kind === 'at') return 0;
+      if (w.kind === 'cannon') return w.dmg * Math.min(1.5, (w.aoe || 1) / 2.5) * .35 * rpm;
+      const dmg = w.kind === 'sniper' ? Math.min(w.dmg, t.def.hp || 100) : w.dmg;
+      return dmg * Math.min(.98, acc * ts) * rpm;
+    }
+    if (t.type !== 'vehicle' || w.noVehicles) return 0;
+    if ((w.kind === 'small' || w.kind === 'mg' || w.kind === 'flame' || w.kind === 'sniper') && !isLight(t)) return 0;
+    const pen = U.profile(w.pen, w.rng, d), armor = t.def.armor[0] || 1;
+    return w.dmg * Math.min(.95, acc * ts) * rpm * Math.min(1, pen / armor);
+  }
+  /* the same for a whole unit: every living man's weapon (the crew weapon once it is set up), or every gun on a vehicle */
+  function unitDps(e, t, d) {
+    let s = 0;
+    if (e.type === 'vehicle') { for (const k of e.def.weapons) s += weaponDps(D.W[k], t, d); return s; }
+    if (e.type !== 'squad') return 0;
+    const al = e.models.filter(m => m.alive), cw = SIM.weaponOf(e), up = cw && e.crew && e.crew.state === 'deployed';
+    for (const m of al) { if (cw && m === al[0]) { if (up) s += weaponDps(cw, t, d); continue; } if (m.weapon) s += weaponDps(D.W[m.weapon], t, d); }
+    return s;
+  }
+  return { weaponDps, unitDps, isLight, BLAST, RANGING, MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;

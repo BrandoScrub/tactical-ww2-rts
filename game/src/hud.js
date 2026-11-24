@@ -13,6 +13,13 @@ const HUD = (() => {
   function put(node, html) { if (node._h !== html) { node.innerHTML = html; node._h = html; } }
   function h(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
   // unit class line for cards and tooltips: "Elite infantry" / "Medium vehicle"
+  /* where the unit fights best (AI.bestRange): close under 13 m, mid to 26 m, long beyond */
+  const rangeLine = id => {
+    const b = typeof AI !== 'undefined' && AI.bestRange ? AI.bestRange(id) : null; if (!b) return '';
+    if (b.vs === 'indirect') return `<div class="range">Best range: ${b.what}</div>`;
+    const band = b.d < 13 ? 'close' : b.d < 26 ? 'mid' : 'long';
+    return `<div class="range">Best range vs ${b.vs}: ${band} (about ${Math.round(b.d)} m)</div>`;
+  };
   const clsLine = def => { const c = def.cls && (D.CLASSES[def.armor ? 'vehicle' : 'infantry'] || {})[def.cls]; return c ? `<div class="cls">${c.name}</div>` : ''; };
   const fmt = v => Math.floor(v).toString();
   const costStr = c => [c.mp ? `<span class="c-mp">${c.mp}</span>` : '', c.mu ? `<span class="c-mu">${c.mu}</span>` : '', c.fu ? `<span class="c-fu">${c.fu}</span>` : ''].join(' ');
@@ -154,7 +161,7 @@ const HUD = (() => {
       const keys = [0, 1, 2, 3, 4, 5];
       e.def.produce.forEach((u, i) => {
         const def = SIM.unitDef(u), why = SIM.prodBlock(G, e, u);
-        out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${clsLine(def)}${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };
+        out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${clsLine(def)}${rangeLine(u)}${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };
       });
       out[7] = { img: ico('rally'), label: 'Set rally point', tip: '<b>Set rally point</b><div>New units walk here after they are produced.</div>', act: () => { ui.mode = { type: 'rally', id: e.id }; } };
       // the HQ card holds one place-building button per tier (reference board 08, item 6): both armies order their base
@@ -298,7 +305,7 @@ const HUD = (() => {
     const cov = e.type === 'squad' ? COMBAT.squadCover(G, e) : null;
     const state = e.type === 'squad' ? (e.retreating ? 'Retreating' : e.garrison != null ? 'In a building' : e.suppState === 2 ? 'Pinned' : e.suppState === 1 ? 'Suppressed' : e.crew ? ({ packed: 'Packed up', setting: 'Setting up', deployed: 'Set up', tearing: 'Packing up' })[e.crew.state] : e.building ? 'Building' : e.upgrading ? 'Upgrading: ' + Math.round(e.upgrading.t / e.upgrading.total * 100) + '%' : '') : (e.owner < 0 ? 'Abandoned: right-click with infantry to recrew' : e.crit ? [e.crit.engine === 2 ? 'Immobilised' : e.crit.engine === 1 ? 'Engine damaged' : '', e.crit.gun ? 'Main gun destroyed' : '', e.crit.shockT > G.t ? 'Crew shocked' : ''].filter(Boolean).join(' · ') || (e.order.type === 'reverse' ? 'Reversing' : '') : e.order.type === 'reverse' ? 'Reversing' : '');
     const weapons = e.type === 'squad' ? [...new Set(e.models.filter(m => m.alive && m.weapon).map(m => D.W[m.weapon].name).concat(e.def.crewWeapon ? [D.W[e.def.weapons[0]].name] : []))] : e.def.weapons.map(w => D.W[w].name);
-    put(body, name + `<div class="role">${e.def.role}</div>${clsLine(e.def)}${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
+    put(body, name + `<div class="role">${e.def.role}</div>${clsLine(e.def)}${rangeLine(e.defId)}${e.def.standIn ? '<div class="note">Stand-in: ' + e.def.standIn + '</div>' : ''}` +
       `<div class="vet"><span class="vs">${[0, 1, 2].map(i => `<b class="${i < e.vet ? 'on' : ''}">&#9733;</b>`).join('')}</span><span class="xpbar"><i style="width:${Math.round(U.clamp(xpf, 0, 1) * 100)}%"></i></span><span class="xpt">XP: ${Math.floor(e.xp)}/${e.vet >= 3 ? th[2] : next}</span></div>` +
       `<div class="line">${strength}${(() => { const h = MAP.hAt(G.map, e.x, e.y); return h >= 1.5 ? `<span class="elev" title="Elevation: sees further; from 2.5 m above a target it fires over the target's cover">&#9650; ${h.toFixed(0)} m</span>` : ''; })()}${cov ? `<span class="cov" style="color:${D.COVER[cov].colour}">&#9960; ${cov === 'none' ? 'no' : cov} cover</span>` : ''}${state ? `<span class="state"${RENDER.squadState(e) ? ` style="color:${RENDER.STATE[RENDER.squadState(e)].col}"><img class="sb" src="${RENDER.badgeURL(RENDER.squadState(e))}">` : '>'}${state}</span>` : ''}</div>` +
       (e.type === 'squad' && !e.retreating && e.supp > .03 ? `<div class="supp" title="Suppression: past the first mark the squad is suppressed (slower, less accurate), past the second it is pinned (only a retreat order works). It wears off out of fire, faster in cover."><span>Suppression</span><b><i style="width:${Math.round(Math.min(1, e.supp / D.SUPP.cap) * 100)}%;background:${e.suppState === 2 ? RENDER.STATE.pinned.fill : e.suppState === 1 ? RENDER.STATE.suppressed.fill : '#c9a865'}"></i><u style="left:${D.SUPP.suppressed / D.SUPP.cap * 100}%"></u><u style="left:${D.SUPP.pinned / D.SUPP.cap * 100}%"></u></b></div>` : '') +

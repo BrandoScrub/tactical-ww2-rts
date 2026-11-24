@@ -15,6 +15,7 @@ What it runs, in order (it stops at the first failure and says which):
      unit classes and squad-owned weapons  game/test/classes.js                no problems
      half-dug positions, AI anti-tank      game/test/positions.js              positions ok
      MG suppression, mortars, defences     game/test/teamweapons.js 2 12       no problems
+     weapon profiles, ranges, MG lanes     game/test/ranges.js                 ranges: all good
      breaking apart, blasts
   3. AI against AI, 8 matches of 18 min     game/test/soak.js 8 18              no problems
   4. the build                              tools/build_web.py dist             (fails if any art file is missing)
@@ -126,6 +127,7 @@ def main(args):
         lambda: run('unit classes and squad weapons', ['node', 'game/test/classes.js'], ok='no problems'),
         lambda: run('positions can be finished, AI answers armour', ['node', 'game/test/positions.js'], ok='positions ok'),
         lambda: run('MGs, mortars, breakable defences, blasts', ['node', 'game/test/teamweapons.js', '2', '12'], ok='no problems'),
+        lambda: run('weapon profiles, fighting ranges, MG lanes', ['node', 'game/test/ranges.js'], ok='ranges: all good'),
     ]
     if not quick: steps.append(lambda: run('AI against AI, 8 matches', ['node', 'game/test/soak.js', '8', '18'], ok='no problems'))
     steps += [
