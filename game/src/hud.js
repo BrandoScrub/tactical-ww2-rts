@@ -54,6 +54,11 @@ const HUD = (() => {
     smoke: g => { g.fillStyle = '#c9c9c4'; for (const [x, y, r] of [[-7, 4, 8], [4, 2, 9], [-1, -7, 8], [9, -6, 6]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); } g.fillStyle = '#555'; g.fillRect(-12, 10, 6, 6); },
     breach: g => { g.fillStyle = '#8a6a44'; g.fillRect(-8, -14, 16, 26); g.fillStyle = '#222'; g.fillRect(-5, -10, 10, 22); g.fillStyle = '#ffb03a'; g.beginPath(); for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5, r = i % 2 ? 5 : 11; g.lineTo(9 + Math.cos(a) * r, 2 + Math.sin(a) * r); } g.fill(); },
     unload: g => { g.fillStyle = '#c9b88c'; g.beginPath(); g.moveTo(-14, -2); g.lineTo(-4, -12); g.lineTo(6, -2); g.lineTo(6, 12); g.lineTo(-14, 12); g.closePath(); g.fill(); g.fillStyle = '#5ad6ff'; g.beginPath(); g.moveTo(16, 4); g.lineTo(6, -4); g.lineTo(6, 0); g.lineTo(-2, 0); g.lineTo(-2, 8); g.lineTo(6, 8); g.lineTo(6, 12); g.closePath(); g.fill(); },
+    cache: g => { g.fillStyle = '#6f7a4a'; g.fillRect(-14, -4, 9, 16); g.fillRect(-4, -4, 9, 16); g.fillStyle = '#9a7a4e'; g.fillRect(6, 2, 10, 10); g.fillRect(4, -9, 10, 10); g.strokeStyle = '#2a2016'; g.lineWidth = 1; g.strokeRect(6, 2, 10, 10); g.strokeRect(4, -9, 10, 10); },
+    bunker: g => { g.fillStyle = '#a9a9a2'; g.beginPath(); g.moveTo(-15, 12); g.lineTo(-12, -6); g.lineTo(12, -6); g.lineTo(15, 12); g.closePath(); g.fill(); g.fillStyle = '#7d8a5a'; g.fillRect(-12, -10, 24, 5); g.fillStyle = '#222'; g.fillRect(-8, 0, 16, 3); },
+    howitzer: g => { g.lineWidth = 4; g.beginPath(); g.moveTo(-6, 4); g.lineTo(14, -10); g.stroke(); g.lineWidth = 3; g.beginPath(); g.moveTo(-6, 4); g.lineTo(-15, 13); g.moveTo(-6, 4); g.lineTo(-3, 14); g.stroke(); g.beginPath(); g.arc(-4, 6, 6, 0, 7); g.stroke(); },
+    medical: g => { g.fillStyle = '#fff'; g.fillRect(-13, -13, 26, 26); g.fillStyle = '#d02a2a'; g.fillRect(-4, -11, 8, 22); g.fillRect(-11, -4, 22, 8); },
+    mgbunker: g => { g.fillStyle = '#a9a9a2'; g.fillRect(-14, -2, 28, 14); g.lineWidth = 3; g.beginPath(); g.moveTo(-2, 2); g.lineTo(16, -8); g.stroke(); },
     lock: g => { g.strokeStyle = '#999'; g.beginPath(); g.arc(0, -4, 7, Math.PI, 0); g.stroke(); g.fillStyle = '#999'; g.fillRect(-10, -4, 20, 15); },
   };
   const ico = name => icon(name, ICONS[name] || ICONS.stop);
@@ -178,7 +183,34 @@ const HUD = (() => {
       defs.forEach((d, i) => { const def = D.DEFENCES[d]; out[i] = { img: ico(d), label: def.name, tip: `<b>${def.name}</b><div>Free: ${def.time}s a section. Drag to lay a line.</div><div>${def.cover ? def.cover[0].toUpperCase() + def.cover.slice(1) + ' cover. ' : ''}${def.blocksInfantry ? 'Stops infantry; vehicles crush it. ' : ''}${def.blocksVehicles ? 'Stops vehicles; heavy tanks break it. ' : ''}</div>`, act: () => { ui.mode = { type: 'line', what: d, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; } }; });
       { const pid = P.side + '_position', def = D.DEFENCES[pid], why = !SIM.canAfford(P, def.cost) ? 'Not enough resources' : null;
         out[3] = { img: ico('position'), label: def.name, tip: `<b>${def.name}</b><div>Holds one infantry squad or a machine-gun team in heavy cover; an HMG inside fires over the front. Empty, either side can take it.</div><div>${costStr(def.cost)} &middot; ${def.time}s build</div>`, cost: def.cost, disabled: !!why, why, act: () => { ui.mode = { type: 'pit', what: pid, ids: selEnts().filter(s => s.def.builder).map(s => s.id) }; if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash('Tap where to dig it'); } } }; }
+      const bIds = selEnts().filter(s => s.def.builder).map(s => s.id);
+      const pitBtn = (slot, id, icon, about) => {
+        const def = D.DEFENCES[id]; if (!def) return;
+        const why = def.req && !P.built.has(def.req) ? 'Requires ' + D.BUILDINGS[def.req].name : !SIM.canAfford(P, def.cost) ? 'Not enough resources' : null;
+        out[slot] = { img: ico(icon), label: def.name, tip: `<b>${def.name}</b><div>${about}</div><div>${costStr(def.cost)} &middot; ${def.time}s build${def.standIn ? '' : ''}</div>${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}`, cost: def.cost, disabled: !!why, why,
+          act: () => { ui.mode = { type: 'pit', what: id, ids: bIds }; if (ui.touch) { mouse.x = RENDER.W / 2; mouse.y = RENDER.H * .42; mouse.inCanvas = true; flash(def.cache ? 'Tap a point you hold' : 'Tap where to build it'); } } };
+      };
+      pitBtn(4, P.side + '_cache', 'cache', 'Built on a point you hold: that point pays half as much again munitions and fuel, and it can\'t be captured until the cache is destroyed.');
+      pitBtn(5, P.side + '_howitzer_pit', 'howitzer', 'A 105 mm howitzer in a gun pit. It fires only when you order a barrage (long range, 6 shells). Hits on the gun wear the pit down.');
+      if (D.DEFENCES[P.side + '_bunker']) {
+        pitBtn(6, P.side + '_bunker', 'bunker', 'Concrete bunker for one squad or an HMG team: heavy cover, and the men inside fire 25% more accurately and 30% faster. Empty, either side can take it. Pioneers can convert it (next buttons).');
+        [['mg', 'mgbunker', 7], ['medical', 'medical', 8], ['repair', 'repair', 9]].forEach(([role, icon, slot]) => {
+          const B = D.BUNKER[role], why = !SIM.canAfford(P, B.cost) ? 'Not enough munitions' : !G.map.houses.some(h => h.bunker && !h.dead && h.owner === 0 && h.built >= 1 && !h.role) ? 'Build a Concrete Bunker first' : null;
+          out[slot] = { img: ico(icon), label: B.name, tip: `<b>Convert to ${B.name}</b><div>${B.about}</div><div>${costStr(B.cost)} &middot; ${B.time}s work &middot; click one of your bunkers</div><div class="note">CoH3 orders this from the bunker; here the Pioneers fit it.</div>`, cost: B.cost, disabled: !!why, why,
+            act: () => { ui.mode = { type: 'convert', role, ids: bIds }; flash(ui.touch ? 'Tap one of your bunkers' : 'Click one of your Concrete Bunkers'); } };
+        });
+      }
       out[11] = { img: ico('back'), label: 'Back', tip: '<b>Back</b><div>Return to orders.</div>', act: () => { ui.page = 'main'; } };
+      return out;
+    }
+    if (e.type === 'squad' && e.def.emplaced) {
+      out[1] = { img: ico('stop'), label: 'Stop', tip: '<b>Stop</b>', act: () => issue(G, sel.map(s => s.id), { type: 'stop' }) };
+      let a = 4;
+      for (const ab of e.def.abilities || []) {
+        const A = D.ABILITIES[ab], cd = Math.max(0, (e.cooldowns[ab] || 0) - G.t), why = cd > 0 ? 'Recharging' : null;
+        out[a++] = { img: ico(A.icon), label: A.name, tip: `<b>${A.name}</b><div>${A.shots} shells &middot; range ${A.minRange}-${A.range} m &middot; ${A.cooldown}s recharge &middot; free</div><div>Click the ground to shell. The gun fires at nothing on its own.</div>`, cd, disabled: !!why, why, act: () => { ui.mode = { type: 'ability', id: ab, ids: sel.filter(s => (s.def.abilities || []).includes(ab)).map(s => s.id) }; } };
+      }
+      if (!e.def.bunkerGun) out[6] = { img: ico('setup'), label: 'Re-face', tip: '<b>Re-face</b><div>Turn the gun in its pit.</div>', act: () => { ui.mode = { type: 'face', ids: sel.filter(s => s.crew).map(s => s.id) }; } };
       return out;
     }
     // orders row
@@ -542,7 +574,8 @@ const HUD = (() => {
       if (m.type === 'pit') { if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const why = SIM.canPit(G, 0, m.what, wx, wy); if (why) { flash(why); return; } issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: wx, y: wy }, e.shiftKey); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } return; }
       if (m.type === 'line') { const s = m.start || { x: wx, y: wy }; if (!m.ids.some(id => G.byId.get(id))) { ui.mode = null; return; } const far = Math.hypot(wx - s.x, wy - s.y) > 1.5; issue(G, m.ids.slice(0, 1), { type: 'build', what: m.what, x: s.x, y: s.y, x2: far ? wx : null, y2: far ? wy : null }, e.shiftKey); if (!e.shiftKey) { ui.mode = null; ui.page = 'main'; } else m.start = null; return; }
       if (m.type === 'face') { const ents = m.ids.map(id => G.byId.get(id)).filter(Boolean); for (const s of ents) issue(G, [s.id], { type: 'setup', heading: Math.atan2(wy - s.y, wx - s.x) }); ui.mode = null; return; }
-      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY); if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }, e.shiftKey); ui.mode = null; return; }
+      if (m.type === 'repair') { const t = entAt(e.clientX, e.clientY), hw = !t || t.type === 'squad' ? houseAtScreen(e.clientX, e.clientY) : null; if (t && t.owner === 0 && t.type !== 'squad') issue(G, m.ids, { type: 'repair', target: t.id }, e.shiftKey); else if (hw && hw.pit && hw.owner === 0) issue(G, m.ids, { type: 'repair', house: hw.id }, e.shiftKey); ui.mode = null; return; }
+      if (m.type === 'convert') { const hb = houseAtScreen(e.clientX, e.clientY); if (!hb || !hb.bunker || hb.owner !== 0) { flash('Click one of your Concrete Bunkers'); return; } issue(G, m.ids.slice(0, 1), { type: 'convert', house: hb.id, role: m.role }, e.shiftKey); ui.mode = null; ui.page = 'main'; return; }
     }
     // box or click select
     const d = mouse.drag;
@@ -592,6 +625,14 @@ const HUD = (() => {
     }
     // right-click a house: the nearest selected infantry squad goes in (one squad per house); the rest move up beside it
     const hh = !dragged && !t ? houseAtScreen(e.clientX, e.clientY) : null;
+    // an enemy cache, bunker or gun pit: fire on it (an empty bunker is no one's and can be taken instead)
+    if (hh && hh.pit && hh.built >= 1 && hh.owner === 1 && (hh.cache || hh.gun || hh.role)) { issue(G, units, { type: 'attack', house: hh.id }, Q); marker(hh.x, hh.y, '#ff6a5a'); return; }
+    // one of our own field works that took damage: builders patch it up
+    if (hh && hh.pit && hh.built >= 1 && hh.owner === 0 && hh.hp < hh.maxHp && (hh.noGarrison || hh.role || hh.occ != null)) {
+      const builders = sel.filter(s => s.def && s.def.builder).map(s => s.id);
+      if (builders.length) { issue(G, builders, { type: 'repair', house: hh.id }, Q); marker(hh.x, hh.y, '#7fe0ff'); return; }
+    }
+    if (hh && (hh.noGarrison || hh.role)) { flash(hh.cache ? 'A resource cache holds no troops' : 'Nobody can garrison that'); return; }
     // an unfinished position of ours: selected builders go and finish it
     if (hh && hh.pit && hh.built < 1 && hh.owner === 0) {
       const builders = sel.filter(s => s.def && s.def.builder && !s.retreating).sort((a, b) => U.dist2(a.x, a.y, hh.x, hh.y) - U.dist2(b.x, b.y, hh.x, hh.y));
@@ -735,7 +776,7 @@ const HUD = (() => {
     ui.ghost = null;
     if (m) {
       if (m.type === 'place') ui.ghost = { kind: 'building', id: m.what, x: wx, y: wy, err: SIM.canPlace(G, 0, m.what, wx, wy) };
-      else if (m.type === 'pit') { const foe = SIM.hqOf(G, 1); ui.ghost = { kind: 'pit', x: wx, y: wy, r: D.DEFENCES[m.what].size / 2, art: D.DEFENCES[m.what].art, face: foe ? Math.atan2(foe.y - wy, foe.x - wx) : 0, err: SIM.canPit(G, 0, m.what, wx, wy) }; }
+      else if (m.type === 'pit') { const foe = SIM.hqOf(G, 1), cp = D.DEFENCES[m.what].cache ? SIM.cachePoint(G, wx, wy) : null, gx = cp ? cp.x : wx, gy = cp ? cp.y : wy; ui.ghost = { kind: 'pit', x: gx, y: gy, r: D.DEFENCES[m.what].size / 2, art: D.DEFENCES[m.what].art, face: foe ? Math.atan2(foe.y - gy, foe.x - gx) : 0, err: SIM.canPit(G, 0, m.what, wx, wy) }; }
       else if (m.type === 'line') ui.ghost = m.start ? { kind: 'line', x: m.start.x, y: m.start.y, x2: wx, y2: wy } : { kind: 'target', x: wx, y: wy, r: 1.5 };
       else if (m.type === 'ability' && m.id === 'breach') { const hb = mouse.inCanvas ? houseAtScreen(mouse.x, mouse.y) : null, o = hb && hb.occ != null ? G.byId.get(hb.occ) : null; ui.ghost = hb ? { kind: 'house', h: hb, ok: !!(o && o.owner === 1), label: o && o.owner === 1 ? 'Breach' : 'No enemy inside' } : { kind: 'target', x: wx, y: wy, r: 1.5, err: 'Pick a building the enemy holds' }; }
       else if (m.type === 'ability') { const A = D.ABILITIES[m.id], e = G.byId.get(m.ids[0]); const d = e ? Math.hypot(wx - e.x, wy - e.y) : 0; ui.ghost = { kind: 'target', x: wx, y: wy, r: A.smoke ? A.smoke.radius : m.id === 'barrage' ? 6 : 4, err: A.minRange && d < A.minRange ? 'Too close' : null }; }

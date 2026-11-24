@@ -20,7 +20,7 @@ from artkit.sprite import picture
 from artkit.export import keyed, KEY_TILES
 from artkit.core.materials import Materials
 from models.kit import M
-from models import defences as D, terrain as T
+from models import defences as D, terrain as T, fieldworks as F
 
 OUT = os.path.join(ROOT, 'art')
 SCALE = 0.4
@@ -40,6 +40,12 @@ PROPS = {
     # fighting positions come as a back half and a front half, so men in them sort between the two
     'position_us':   (D.fighting_position_us, 8, 360, 'split'),
     'position_de':   (D.fighting_nest_de, 8, 360, 'split'),
+    # field works (models/fieldworks.py): resource caches, the German concrete bunker, howitzer gun pits
+    'cache_us':      (lambda: F.resource_cache('us'), 8, 360, 'split'),
+    'cache_de':      (lambda: F.resource_cache('de'), 8, 360, 'split'),
+    'bunker_de':     (F.concrete_bunker, 8, 360, 'split'),
+    'gunpit_us':     (lambda: F.gun_pit('us'), 8, 360, 'split'),
+    'gunpit_de':     (lambda: F.gun_pit('de'), 8, 360, 'split'),
     'olive_0':       (lambda: T.olive(seed=3), 1, 360, 0),
     'olive_1':       (lambda: T.olive(seed=11), 1, 360, 0),
     'olive_2':       (lambda: T.olive(seed=17), 1, 360, 0),
@@ -68,6 +74,9 @@ def materials(style):
     t['foliage_dark'] = grade('hedge_foliage', .7, .62, (.9, 1.0, .95))          # cypress: dense, dark, cooler
     t['limestone'] = grade('stone_rough', .35, 1.55)
     t['opening'] = Image.new('RGB', (8, 8), (44, 40, 34))
+    t['concrete'] = grade('stone_dressed', .25, 1.05)                            # poured concrete: the dressed stone tile greyed, as the base buildings do
+    t['turf'] = grade('ground_dry_grass', .8, .9)                                # the earthed-over bunker roof
+    t['drum_us'] = t['us_hull']; t['drum_de'] = t['de_hull']                    # fuel drums and cans in each army's paint
     m.cache.clear()
     return m
 

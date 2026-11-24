@@ -13,7 +13,7 @@
    crush rules, abilities that only hit some classes). Not a CoH3 system: CoH3 works from each unit's own armour and
    target size; these groups are this game's own design.
    Every weapon has a `type` (rifle, smg, assault, lmg, sniper, flamer, hmg, vehicle_mg, launcher, at_gun, tank_gun,
-   autocannon, mortar) for the same purpose; `kind` stays the rule the combat code uses today. */
+   autocannon, mortar, howitzer) for the same purpose; `kind` stays the rule the combat code uses today. */
 const DATA = (() => {
   const W = {
     /* ---- small arms ---- */
@@ -28,12 +28,17 @@ const DATA = (() => {
     mg42lmg:  { name: 'MG 42 LMG', type: 'lmg', dmg: 5, acc: [.55, .45, .38], rng: [7, 20, 35], rpm: [300, 250, 200], pen: [1.75, 1.5, 1.33], supp: .05, moveAcc: .5, kind: 'small' },
     springfield: { name: 'M1903 Springfield', type: 'sniper', dmg: 110, acc: [2, 2, 2], rng: [0, 25, 50], rpm: [7.25, 7.25, 7.25], pen: [1, 1, 1], supp: 0, aim: 1.625, noVehicles: true, kind: 'sniper' },
     g43:      { name: 'G43 scoped', type: 'sniper', dmg: 110, acc: [2, 2, 2], rng: [0, 25, 50], rpm: [7.05, 7.05, 7.05], pen: [1, 1, 1], supp: 0, aim: 1.625, noVehicles: true, kind: 'sniper' },
+    garandScout: { name: 'M1 Garand (scout)', type: 'rifle', dmg: 12, acc: [.813, .775, .65], rng: [7, 25, 35], rpm: [20.63, 17.05, 16.6], pen: [1.5, 1, 1], supp: .006, moveAcc: .75, kind: 'small' },
+    g43rifle: { name: 'G43', type: 'rifle', dmg: 13, acc: [.77, .74, .704], rng: [7, 25, 35], rpm: [36.36, 36.36, 36.36], pen: [1.5, 1, 1], supp: .006, moveAcc: .5, kind: 'small' },
+    mg42stoss:{ name: 'MG 42 LMG', type: 'lmg', dmg: 3.5, acc: [.528, .517, .484], rng: [7, 20, 35], rpm: [534.72, 534.72, 430.45], pen: [1.75, 1.5, 1.33], supp: .05, moveAcc: .5, kind: 'small' },
     flamer:   { name: 'Flamethrower', type: 'flamer', dmg: 2, acc: [1, 1, 1], rng: [0, 10, 20], rpm: [142, 142, 142], pen: [2.5, 2.5, 2.5], supp: .05, ignoresCover: true, kind: 'flame' },
     /* ---- machine guns ---- */
     m1919:    { name: '.30 cal M1919', type: 'hmg', dmg: 5, acc: [.748, .518, .396], rng: [10, 30, 45], rpm: [574, 402, 297], pen: [2.5, 2.25, 1.75], supp: .143, suppFar: .074, suppRadius: 15, setup: 3.5, teardown: 3, arc: 95, kind: 'mg' },
     mg42:     { name: 'MG 42', type: 'hmg', dmg: 4, acc: [.702, .506, .283], rng: [10, 25, 45], rpm: [890, 741, 630], pen: [2.25, 1.75, 1.6], supp: .171, suppFar: .121, suppRadius: 17.5, setup: 3.5, teardown: 3.16, arc: 110, kind: 'mg' },
+    mg42bunker: { name: 'MG 42 (bunker)', type: 'hmg', dmg: 4, acc: [.702, .506, .283], rng: [10, 25, 45], rpm: [890, 741, 630], pen: [2.25, 1.75, 1.6], supp: .171, suppFar: .121, suppRadius: 17.5, setup: .1, teardown: .1, arc: 90, kind: 'mg', standIn: 'the MG 42 team profile; CoH3 lists the bunker gun as forward-arc only' },
     coax30:   { name: '.30 cal coaxial', type: 'vehicle_mg', dmg: 4, acc: [.7, .5, .45], rng: [7, 20, 35], rpm: [271, 235, 201], pen: [1, 1, 1], supp: .03, kind: 'small' },
     hull30:   { name: '.30 cal hull MG', type: 'vehicle_mg', dmg: 4, acc: [.7, .5, .45], rng: [7, 20, 35], rpm: [278, 257, 227], pen: [1, 1, 1], supp: .03, arc: 60, kind: 'small' },
+    mg34hull: { name: 'MG 34 hull', type: 'vehicle_mg', dmg: 3, acc: [.35, .25, .10], rng: [7, 20, 35], rpm: [522, 450, 394], pen: [1, 1, 1], supp: .03, arc: 60, kind: 'small' },
     mg34coax: { name: 'MG 34 coaxial', type: 'vehicle_mg', dmg: 3, acc: [.6, .5, .4], rng: [7, 20, 35], rpm: [522, 450, 394], pen: [1, 1, 1], supp: .03, kind: 'small' },
     m8coax:   { name: '.30 cal coaxial', type: 'vehicle_mg', dmg: 4, acc: [.59, .46, .24], rng: [7, 20, 35], rpm: [271, 235, 201], pen: [1, 1, 1], supp: .03, kind: 'small' },
     m2hb:     { name: 'M2HB .50 cal', type: 'vehicle_mg', dmg: 9, acc: [.55, .45, .35], rng: [7, 20, 35], rpm: [209, 209, 209], pen: [4, 3, 2], supp: .05, kind: 'small' },
@@ -53,10 +58,18 @@ const DATA = (() => {
     m8_37:    { name: '37 mm M6', type: 'tank_gun', dmg: 80, acc: [.075, .0475, .035], rng: [10, 25, 40], rpm: [13.15, 13.15, 13.15], pen: [55, 45, 40], kind: 'cannon', aoe: 1.5, turret: true },
     chaffee75:{ name: '75 mm M6', type: 'tank_gun', dmg: 120, acc: [.1, .05, .04], rng: [15, 27.5, 40], rpm: [12.63, 12.63, 12.63], pen: [120, 108, 95], kind: 'cannon', aoe: 1.8, turret: true, aoeNote: 'standIn 2026-11-24: smaller burst (was 2.5) so the Chaffee hunts light vehicles and the Sherman is the infantry killer' },
     m10_76:   { name: '3-inch M7', type: 'tank_gun', dmg: 160, acc: [.075, .05, .045], rng: [15, 30, 50], rpm: [10, 10, 10], pen: [200, 180, 160], kind: 'cannon', aoe: 1.5, turret: true, standIn: true },
+    stuart37: { name: '37 mm M6', type: 'tank_gun', dmg: 80, acc: [.075, .0475, .035], rng: [10, 25, 40], rpm: [14, 14, 14], pen: [70, 60, 50], kind: 'cannon', aoe: 1.5, turret: true, standIn: true },
+    m26_90:   { name: '90 mm M3', type: 'tank_gun', dmg: 160, acc: [.1, .05, .04], rng: [15, 27.5, 45], rpm: [11.5, 11.5, 11.5], pen: [290, 250, 210], kind: 'cannon', aoe: 2.2, turret: true, standIn: true },
+    panther75:{ name: '7.5 cm KwK 42', type: 'tank_gun', dmg: 160, acc: [.1, .05, .04], rng: [0, 20, 40], rpm: [13.71, 13.71, 13.71], pen: [300, 250, 220], kind: 'cannon', aoe: 1.5, turret: true },
+    tiger88:  { name: '8.8 cm KwK 36', type: 'tank_gun', dmg: 240, acc: [.075, .0475, .035], rng: [0, 22.5, 45], rpm: [9.23, 9.23, 9.23], pen: [300, 250, 220], kind: 'cannon', aoe: 3, turret: true, aoeNote: 'standIn: CoH3 lists scatter, not a blast radius; the 88 HE round sized between the Sherman and the Panzer IV' },
     pz2_20:   { name: '2 cm KwK 30', type: 'autocannon', dmg: 18, acc: [.06, .045, .035], rng: [10, 25, 40], rpm: [60, 60, 60], pen: [45, 35, 28], kind: 'cannon', aoe: .8, turret: true, standIn: true },
     /* ---- indirect ---- */
     mortar81: { name: '81 mm mortar', type: 'mortar', dmg: 100, pen: [20, 20, 20], rng: [25, 40, 90], rpm: [5.58, 5.58, 5.58], minRange: 25, setup: 2.4, teardown: 1.9, flight: 3.125, kind: 'indirect', aoe: 3, scatter: [3, 6, 13] },
     mortar60: { name: '60 mm M2 mortar', type: 'mortar', dmg: 80, pen: [15, 15, 15], rng: [20, 35, 80], rpm: [7, 7, 7], minRange: 20, setup: 2.4, teardown: 1.9, flight: 2.8, kind: 'indirect', aoe: 2.6, scatter: [3, 6, 12], standIn: true },
+    /* 105 mm field howitzers in emplacements: barrage only (CoH3: "Must barrage to attack"). noAuto: never picks its own
+       targets. Damage and range are stand-ins sized to a 200 m map (CoH3 lists a 110 m auto-fire range for the US gun). */
+    how105us: { name: '105 mm M2A1', type: 'howitzer', dmg: 160, pen: [40, 40, 40], rng: [30, 90, 150], rpm: [6, 6, 6], minRange: 30, flight: 4.5, kind: 'indirect', aoe: 4.5, scatter: [6, 10, 16], noAuto: true, standIn: 'damage, blast, scatter, range' },
+    how105de: { name: '10.5 cm leFH 18', type: 'howitzer', dmg: 160, pen: [40, 40, 40], rng: [30, 90, 150], rpm: [6, 6, 6], minRange: 30, flight: 4.5, kind: 'indirect', aoe: 4.5, scatter: [6, 10, 16], noAuto: true, standIn: 'damage, blast, scatter, range' },
     grw34:    { name: '8 cm GrW 34', type: 'mortar', dmg: 100, pen: [20, 20, 20], rng: [25, 40, 90], rpm: [5.58, 5.58, 5.58], minRange: 25, setup: 2.4, teardown: 1.9, flight: 3.125, kind: 'indirect', aoe: 3, scatter: [3, 6, 13] },
   };
 
@@ -64,13 +77,13 @@ const DATA = (() => {
     infantry: {
       light:  { name: 'Light infantry', about: 'Builders and team-weapon crews: support troops, lightly equipped.' },
       medium: { name: 'Line infantry', about: 'Mainline rifle and anti-tank squads.' },
-      elite:  { name: 'Elite infantry', about: 'Veteran or specialist troops: Panzergrenadiers, snipers.' },
+      elite:  { name: 'Elite infantry', about: 'Veteran or specialist troops: Panzergrenadiers, Stoßtruppen, snipers.' },
     },
     vehicle: {
       ultralight: { name: 'Ultra-light vehicle', about: 'Unarmoured: jeeps, motorcycles. Small arms hurt them.' },
       light:      { name: 'Light vehicle', about: 'Lightly armoured: half-tracks, scout and armoured cars, light tanks.' },
       medium:     { name: 'Medium vehicle', about: 'Medium tanks, assault guns and tank destroyers.' },
-      heavy:      { name: 'Heavy vehicle', about: 'Heavy tanks and tank destroyers (none in the roster yet).' },
+      heavy:      { name: 'Heavy vehicle', about: 'Heavy tanks: Panther, Tiger, Pershing.' },
     },
   };
 
@@ -83,6 +96,11 @@ const DATA = (() => {
       vet: [600, 1800, 3600], builder: true, repair: 8,
       upgrades: [{ id: 'flame', name: 'M2 Flamethrower', cost: { mu: 50 }, time: 20, swap: { index: 1, sprite: 'flamethrower', weapon: 'flamer' } }],
       abilities: [] },
+    us_scouts: { name: 'Scout Squad', side: 'us', cls: 'light', role: 'Recon Infantry / Fast capture', glyph: 'rifle',
+      cost: { mp: 160 }, pop: 4, time: 30, upkeep: 3, reinforce: 28, hp: 85, speed: 3.6, sight: 45, capture: 1.5,
+      models: ['leader', 'rifleman', 'rifleman'], weapons: ['garandScout', 'garandScout', 'garandScout'],
+      vet: [600, 1800, 3600], vetBonus: [{ rAcc: .9 }, { acc: 1.1 }, { hp: 20, acc: 1.1 }],
+      abilities: ['smokeGrenade'] },
     us_riflemen: { name: 'Riflemen Squad', side: 'us', cls: 'medium', role: 'Mainline Infantry / Anti-infantry', glyph: 'rifle',
       cost: { mp: 270 }, pop: 8, time: 20, upkeep: 12, reinforce: 30, hp: 95, speed: 3.6, sight: 35, capture: 1.25,
       models: ['leader', 'rifleman', 'rifleman', 'rifleman', 'rifleman', 'rifleman'], weapons: ['thompson', 'garand', 'garand', 'garand', 'garand', 'garand'],
@@ -142,10 +160,30 @@ const DATA = (() => {
       cost: { mp: 340 }, pop: 8, time: 30, upkeep: 12, reinforce: 32.4, hp: 115, speed: 3.6, sight: 35, capture: 1.5,
       models: ['assault_trooper', 'assault_trooper', 'assault_trooper', 'assault_trooper', 'assault_trooper'], weapons: ['mp44', 'mp44', 'mp44', 'mp44', 'mp44'],
       vet: [1000, 3000, 6000], vetBonus: [{ rAcc: .85 }, { rAcc: .85, rof: 1.25 }, { hp: 15, acc: 1.3 }], abilities: ['bundledGrenade', 'breach'] },
+    de_stoss: { name: 'Stoßtruppen Squad', side: 'de', cls: 'elite', role: 'Elite Infantry / Anti-infantry', glyph: 'elite',
+      cost: { mp: 380 }, pop: 9, time: 30, upkeep: 13.5, reinforce: 44.1, hp: 120, speed: 3.6, sight: 35, capture: 1, dmgTaken: .85,
+      models: ['assault_trooper', 'assault_trooper', 'assault_trooper', 'lmg'], weapons: ['g43rifle', 'g43rifle', 'g43rifle', 'mg42stoss'],
+      vet: [1200, 3600, 7200], vetBonus: [{ rof: 1.25 }, { acc: 1.2, rAcc: .8 }, { hp: 20, acc: 1.25 }], abilities: ['stickGrenade', 'smokeGrenade'] },
     de_at_gun: { name: 'Pak 40 Anti-tank Gun Team', side: 'de', cls: 'light', role: 'Team Weapon / Anti-vehicle', glyph: 'atgun',
       cost: { mp: 280 }, pop: 8, time: 45, upkeep: 8, reinforce: 29, hp: 90, speed: 3.6, sight: 35, targetSize: 1.33,
       models: ['pusher', 'pusher', 'rifleman', 'rifleman'], weapons: ['pak40', null, 'mp40', 'mp40'],
       crewWeapon: 'anti_tank_gun', towed: true, vet: [1100, 3300, 6600] },
+
+    /* Emplacements (CoH3: built by engineers, fixed, the structure takes the damage). `emplaced`: never moves or
+       retreats; it sits in its gun pit (DEFENCES ..._howitzer) and hits on it go to the pit's health. Crews come from
+       the gun art's crew layout. */
+    us_howitzer: { name: 'M2A1 Howitzer Emplacement', side: 'us', cls: 'light', role: 'Emplacement / Artillery (barrage only)', glyph: 'mortar', emplaced: true, standIn: 'CoH3 unlocks it through a battlegroup; here the Motor Pool unlocks it',
+      cost: { mp: 320, fu: 60 }, pop: 6, time: 40, upkeep: 6, reinforce: 0, hp: 80, speed: 0, sight: 35, targetSize: 1,
+      models: ['at_gunner', 'at_loader', 'at_commander'], weapons: ['how105us', null, null],
+      crewWeapon: 'howitzer', vet: [2400, 4800, 9600], abilities: ['howBarrage'] },
+    de_howitzer: { name: 'leFH 18 Howitzer Emplacement', side: 'de', cls: 'light', role: 'Emplacement / Artillery (barrage only)', glyph: 'mortar', emplaced: true, standIn: 'CoH3 unlocks it through a battlegroup; here the Panzergrenadier Kompanie unlocks it',
+      cost: { mp: 320, fu: 60 }, pop: 6, time: 40, upkeep: 6, reinforce: 0, hp: 80, speed: 0, sight: 35, targetSize: 1,
+      models: ['at_gunner', 'at_loader', 'at_commander'], weapons: ['how105de', null, null],
+      crewWeapon: 'howitzer', vet: [2400, 4800, 9600], abilities: ['howBarrage'] },
+    de_bunker_mg: { name: 'MG 42 Bunker', side: 'de', cls: 'light', role: 'Emplacement / Suppression', glyph: 'mg', emplaced: true, bunkerGun: true,
+      cost: { mu: 60 }, pop: 0, time: 0, upkeep: 0, reinforce: 0, hp: 80, speed: 0, sight: 35, targetSize: 1,
+      models: ['mg_gunner', 'loader_box'], weapons: ['mg42bunker', null],
+      crewWeapon: 'tripod_mg', vet: [700, 2100, 4200] },
   };
 
   /* Each squad owns its guns. The keys in a squad's `weapons` and upgrade swaps are base profiles from W; below, every
@@ -177,12 +215,18 @@ const DATA = (() => {
     us_chaffee: { name: 'M24 Chaffee Light Tank', side: 'us', cls: 'light', art: 'us_light_tank_m24', role: 'Light Tank / Anti-light-vehicle', glyph: 'lighttank',
       cost: { mp: 270, fu: 60 }, pop: 9, time: 45, upkeep: 13.5, hp: 480, armor: [50, 37.5, 25], targetSize: 18, speed: 6.9, accel: 5, rot: 60, sight: 35,
       weapons: ['chaffee75', 'coax30', 'hull30'], vet: [1100, 3300, 6600], length: 5.5, width: 3 },
+    us_stuart: { name: 'M5A1 Stuart Light Tank', side: 'us', cls: 'light', art: 'us_light_tank', role: 'Light Tank / Raider', glyph: 'lighttank', standIn: 'not in the CoH3 US roster: a fast early light tank for the Motor Pool',
+      cost: { mp: 260, fu: 50 }, pop: 8, time: 35, upkeep: 12, hp: 400, armor: [60, 40, 25], targetSize: 17, speed: 7.8, accel: 5, rot: 65, sight: 35,
+      weapons: ['stuart37', 'coax30', 'hull30'], vet: [1000, 3000, 6000], length: 4.8, width: 2.4 },
     us_sherman: { name: 'M4A3 Sherman Medium Tank', side: 'us', cls: 'medium', art: 'us_medium_tank', role: 'Medium Tank / Anti-infantry / Anti-vehicle', glyph: 'tank',
       cost: { mp: 340, fu: 90 }, pop: 12, time: 60, upkeep: 18, hp: 720, armor: [195, 100, 80], targetSize: 20, speed: 5.5, accel: 2.3, rot: 45, sight: 35,
       weapons: ['sherman75', 'coax30', 'hull30'], vet: [1800, 5400, 10800], length: 6, width: 3 },
     us_m10: { name: 'M10 Tank Destroyer', side: 'us', cls: 'medium', art: 'us_tank_destroyer', role: 'Tank Destroyer / Anti-vehicle', glyph: 'td', standIn: 'fills the M18 Hellcat slot of the Tank Depot',
       cost: { mp: 300, fu: 85 }, pop: 10, time: 50, upkeep: 15, hp: 560, armor: [100, 60, 40], targetSize: 19, speed: 5.5, accel: 2.5, rot: 40, sight: 35,
       weapons: ['m10_76'], vet: [1400, 4200, 8400], length: 6.8, width: 3 },
+    us_pershing: { name: 'M26 Pershing Heavy Tank', side: 'us', cls: 'heavy', art: 'us_heavy_tank', role: 'Heavy Tank / Anti-vehicle', glyph: 'tank', standIn: 'not in the CoH3 US roster: the US answer to the Panther and Tiger; numbers sized between them',
+      cost: { mp: 500, fu: 160 }, pop: 18, time: 70, upkeep: 26, hp: 1000, armor: [300, 160, 80], targetSize: 23, speed: 4.6, accel: 1.7, rot: 36, sight: 35,
+      weapons: ['m26_90', 'coax30', 'hull30'], vet: [2400, 7200, 14400], length: 7, width: 3.5 },
 
     de_bike: { name: 'Motorcycle and Sidecar', side: 'de', cls: 'ultralight', art: 'de_scout', role: 'Ultra-light Vehicle / Recon', glyph: 'jeep', standIn: 'fills the Kettenkrad slot of the HQ',
       cost: { mp: 160 }, pop: 2, time: 20, upkeep: 2, hp: 180, armor: [4, 3, 3], targetSize: 9, speed: 11.75, accel: 8.5, rot: 85, sight: 40, capture: 1.5,
@@ -202,23 +246,30 @@ const DATA = (() => {
     de_pz4: { name: 'Panzer IV Medium Tank', side: 'de', cls: 'medium', art: 'de_medium_tank', role: 'Medium Tank / Anti-infantry / Anti-vehicle', glyph: 'tank',
       cost: { mp: 360, fu: 100 }, pop: 13, time: 60, upkeep: 19.5, hp: 720, armor: [170, 95, 70], targetSize: 20, speed: 5.25, accel: 2, rot: 42, sight: 35,
       weapons: ['pz4_75', 'mg34coax', 'mg34coax'], vet: [1800, 5400, 10800], length: 7, width: 3 },
+    // CoH3 3.0.1: built from the Panzer Kompanie once a battlegroup unlocks it; here the Panzer Kompanie makes it
+    de_panther: { name: 'Panther Heavy Tank', side: 'de', cls: 'heavy', art: 'de_heavy_tank', role: 'Heavy Tank / Anti-vehicle', glyph: 'tank',
+      cost: { mp: 450, fu: 125 }, pop: 16, time: 60, upkeep: 24, hp: 900, armor: [330, 140, 80], targetSize: 23, speed: 5.2, accel: 1.8, rot: 44, sight: 35,
+      weapons: ['panther75', 'mg34coax'], vet: [2000, 6000, 12000], vetBonus: [{ acc: 1.05 }, { acc: 1.25, rof: 1.15 }, { rof: 1.15, hp: 0 }], length: 7.5, width: 3.4 },
+    de_tiger: { name: 'Tiger Heavy Tank', side: 'de', cls: 'heavy', art: 'de_heavy_tank_tiger', role: 'Heavy Tank / Anti-infantry / Anti-vehicle', glyph: 'tank', standIn: 'a battlegroup call-in in CoH3; here the Panzer Kompanie makes it',
+      cost: { mp: 720, fu: 200 }, pop: 24, time: 60, upkeep: 36, hp: 1200, armor: [380, 210, 80], targetSize: 26, speed: 3.8, accel: 1.5, rot: 25, sight: 35,
+      weapons: ['tiger88', 'mg34coax', 'mg34hull'], vet: [4470, 13410, 26820], length: 7.2, width: 3.6 },
   };
 
   /* Buildings. `req`: buildings that must stand first (any one of a list in an inner array). `produce`: unit ids.
      Size in metres (footprint w x d). CoH3 places them from the HQ (Wehrmacht) or by engineers (US); here both
      factions place from the engineers' build page and the HQ card shows each tier, as the reference boards do. */
   const BUILDINGS = {
-    us_hq: { name: 'Headquarters', side: 'us', hp: 3000, size: [14, 10], glyph: 'house', produce: ['us_engineers'], reinforce: true, retreat: true },
+    us_hq: { name: 'Headquarters', side: 'us', hp: 3000, size: [14, 10], glyph: 'house', produce: ['us_engineers', 'us_scouts'], reinforce: true, retreat: true },
     us_barracks: { name: 'Barracks', side: 'us', hp: 1500, size: [12, 9], glyph: 'infantry', cost: { mp: 120, fu: 15 }, time: 15, produce: ['us_riflemen', 'us_mortar', 'us_jeep'], reinforce: true, tab: 1 },
     us_wsc: { name: 'Weapon Support Center', side: 'us', hp: 1500, size: [12, 9], glyph: 'shield', cost: { mp: 100, fu: 15 }, time: 15, produce: ['us_hmg', 'us_bazooka', 'us_sniper', 'us_halftrack'], reinforce: true, tab: 2 },
-    us_motorpool: { name: 'Motor Pool', side: 'us', hp: 2000, size: [14, 11], glyph: 'halftrack', cost: { mp: 200, fu: 40 }, time: 40, req: [['us_barracks', 'us_wsc']], produce: ['us_m8', 'us_at_gun', 'us_chaffee'], tab: 3 },
-    us_depot: { name: 'Tank Depot', side: 'us', hp: 2000, size: [16, 12], glyph: 'tank', cost: { mp: 300, fu: 140 }, time: 80, req: ['us_motorpool'], produce: ['us_sherman', 'us_m10'], tab: 4 },
+    us_motorpool: { name: 'Motor Pool', side: 'us', hp: 2000, size: [14, 11], glyph: 'halftrack', cost: { mp: 200, fu: 40 }, time: 40, req: [['us_barracks', 'us_wsc']], produce: ['us_m8', 'us_at_gun', 'us_chaffee', 'us_stuart'], tab: 3 },
+    us_depot: { name: 'Tank Depot', side: 'us', hp: 2000, size: [16, 12], glyph: 'tank', cost: { mp: 300, fu: 140 }, time: 80, req: ['us_motorpool'], produce: ['us_sherman', 'us_m10', 'us_pershing'], tab: 4 },
 
     de_hq: { name: 'Headquarters', side: 'de', hp: 3000, size: [14, 10], glyph: 'house', produce: ['de_pioneers', 'de_bike'], reinforce: true, retreat: true },
     de_infanterie: { name: 'Infanterie Kompanie', side: 'de', hp: 1500, size: [12, 9], glyph: 'infantry', cost: { mp: 80, fu: 15 }, time: 15, produce: ['de_grenadiers', 'de_hmg', 'de_mortar', 'de_sniper'], reinforce: true, tab: 1 },
     de_luftwaffe: { name: 'Luftwaffe Kompanie', side: 'de', hp: 1500, size: [12, 9], glyph: 'shield', cost: { mp: 150, fu: 50 }, time: 40, req: ['de_infanterie'], produce: ['de_schreck', 'de_222', 'de_pz2'], reinforce: true, tab: 2 },
     de_pzgren: { name: 'Panzergrenadier Kompanie', side: 'de', hp: 2000, size: [14, 10], glyph: 'halftrack', cost: { mp: 150, fu: 40 }, time: 40, req: ['de_infanterie'], produce: ['de_panzergrenadiers', 'de_251', 'de_at_gun', 'de_stug'], reinforce: true, tab: 3 },
-    de_panzer: { name: 'Panzer Kompanie', side: 'de', hp: 2000, size: [16, 12], glyph: 'tank', cost: { mp: 300, fu: 135 }, time: 55, req: [['de_luftwaffe', 'de_pzgren']], produce: ['de_pz4'], tab: 4 },
+    de_panzer: { name: 'Panzer Kompanie', side: 'de', hp: 2000, size: [16, 12], glyph: 'tank', cost: { mp: 300, fu: 135 }, time: 55, req: [['de_luftwaffe', 'de_pzgren']], produce: ['de_pz4', 'de_stoss', 'de_panther', 'de_tiger'], tab: 4 },
   };
 
   /* Field defences any builder can lay. Free: build time only (CoH3: sandbags 6 s, wire 3 s, tank trap 9 s per piece). */
@@ -231,6 +282,27 @@ const DATA = (() => {
        neutral when empty (any side can take it). Health is a stand-in: CoH3's value isn't published. */
     us_position: { name: 'Fighting Position', side: 'us', point: true, cost: { mp: 100 }, time: 15, hp: 600, size: 3.6, art: 'position_us', standIn: 'health' },
     de_position: { name: 'Fighting Nest', side: 'de', point: true, cost: { mp: 50 }, time: 20, hp: 500, size: 3.6, art: 'position_de', standIn: 'health' },
+    /* Resource Cache (CoH3, US Engineers and Wehrmacht Pioneers; cohdex.com): 200 mp, 20 s, 600 health. Built over a
+       point its side holds; that point pays half as much again munitions and fuel, and can't be captured while it
+       stands (the enemy has to destroy it first). */
+    us_cache: { name: 'Resource Cache', side: 'us', point: true, cache: true, cost: { mp: 200 }, time: 20, hp: 600, size: 3, art: 'cache_us', bonus: .5 },
+    de_cache: { name: 'Resource Cache', side: 'de', point: true, cache: true, cost: { mp: 200 }, time: 20, hp: 600, size: 3, art: 'cache_de', bonus: .5 },
+    /* Concrete Bunker (CoH3, Wehrmacht Pioneers; coh3stats / cohdex): 175 mp, 35 s, 720 health; one squad or an HMG
+       team; garrisoned men fire 25% more accurately and 30% faster (Fortified Combat Position). Upgrades in BUNKER. */
+    de_bunker: { name: 'Concrete Bunker', side: 'de', point: true, bunker: true, roofed: true, cost: { mp: 175 }, time: 35, hp: 720, size: 4.4, art: 'bunker_de', fortified: { acc: 1.25, rof: 1.3 } },
+    /* Howitzer emplacements: the gun pit is the structure (its health is the emplacement's), the gun and crew sit in it.
+       US M2A1: 320 mp, 60 fu, 40 s (coh3stats, Engineer Squad). The German leFH 18 is given the same. Health is a
+       stand-in (CoH3 doesn't publish it). `req`: a base building that must stand first (stand-in for the battlegroup). */
+    us_howitzer_pit: { name: 'M2A1 Howitzer Emplacement', side: 'us', point: true, emplacement: 'us_howitzer', cost: { mp: 320, fu: 60 }, time: 40, hp: 900, size: 6.4, art: 'gunpit_us', req: 'us_motorpool', standIn: 'health; the Motor Pool requirement' },
+    de_howitzer_pit: { name: 'leFH 18 Howitzer Emplacement', side: 'de', point: true, emplacement: 'de_howitzer', cost: { mp: 320, fu: 60 }, time: 40, hp: 900, size: 6.4, art: 'gunpit_de', req: 'de_pzgren', standIn: 'health; the Panzergrenadier Kompanie requirement' },
+  };
+
+  /* Concrete Bunker upgrades (CoH3; cohdex.com). Each ends its use as a garrison. Here a Pioneer squad fits them on site
+     (CoH3 orders them from the bunker itself). Heal rate and reach are stand-ins; the repair rate is CoH3's. */
+  const BUNKER = {
+    mg:      { name: 'MG 42 Bunker', cost: { mu: 60 }, time: 15, about: 'A machine gun fires from the front slit; no garrison.', crew: 'de_bunker_mg' },
+    repair:  { name: 'Repair Bunker', cost: { mu: 70 }, time: 15, about: 'Repairs vehicles, emplacements and itself near it (+6 health a second, out of combat); no garrison.', rate: 6, reach: 15 },
+    medical: { name: 'Medical Bunker', cost: { mu: 70 }, time: 15, about: 'Heals infantry near it and reinforces them there; no garrison.', rate: 4, reach: 15, standIn: 'heal rate and reach' },
   };
 
   const ABILITIES = {
@@ -240,6 +312,7 @@ const DATA = (() => {
     breach: { name: 'Breach', cost: { mu: 30 }, range: 0, cooldown: 30, target: 'house', icon: 'breach', standIn: 'CoH3 Breach: grenades through the door force the garrison out; cost and damage are estimates' },
     smokeGrenade: { name: 'Smoke Grenade', cost: { mu: 15 }, range: 25, cooldown: 40, dmg: 0, aoe: 0, fuse: 1, target: 'ground', icon: 'smoke', smoke: { radius: 6, life: 22 }, standIn: 'smoke screen for line infantry; cost and size are estimates' },
     smokeBarrage: { name: 'Smoke Barrage', cost: { mu: 15 }, range: 90, minRange: 25, cooldown: 45, shots: 3, target: 'ground', icon: 'smoke', smoke: { radius: 7.5, life: 28 }, standIn: 'mortar smoke rounds; cost and size are estimates' },
+    howBarrage: { name: '105 mm Barrage', cost: {}, range: 150, minRange: 30, cooldown: 90, shots: 6, gap: 2.6, target: 'ground', icon: 'barrage', standIn: 'shells, recharge and range: CoH3 gives the zeroed-in barrage, not these numbers' },
     barrage: { name: 'High-Explosive Barrage', cost: {}, range: 90, minRange: 25, cooldown: 20, shots: 6, target: 'ground', icon: 'barrage' },
   };
 
@@ -269,6 +342,6 @@ const DATA = (() => {
      not been shot at for recoverDelay seconds (series rule; the delay itself is a stand-in). */
   const SUPP = { suppressed: .2, pinned: .65, recover: .07, recoverDelay: 1.5, cap: 1, standIn: 'recover, recoverDelay' };
 
-  return { CLASSES, W, SQUADS, VEHICLES, BUILDINGS, DEFENCES, ABILITIES, FACTIONS, COVER, ECON, SUPP };
+  return { CLASSES, W, SQUADS, VEHICLES, BUILDINGS, DEFENCES, BUNKER, ABILITIES, FACTIONS, COVER, ECON, SUPP };
 })();
 if (typeof module !== 'undefined') module.exports = DATA;

@@ -129,7 +129,9 @@ const MAP = (() => {
        sight, and is built by engineers (built 0..1). face: the way its firing notch points. */
     m.addPit = (x, y, def, owner, face) => {
       const h = { id: m.houses.length, x, y, w: def.size, d: def.size, hp: def.hp * .1, maxHp: def.hp, occ: null, dead: false,
-        pit: true, defId: def.id, prop: def.art, owner, face, built: 0 };
+        pit: true, defId: def.id, prop: def.art, owner, face, built: 0,
+        // field works that are not fighting positions: a cache holds no one; a gun pit holds only its gun; a bunker has a roof
+        cache: !!def.cache, bunker: !!def.bunker, roofed: !!def.roofed, noGarrison: !!(def.cache || def.emplacement) };
       m.houses.push(h);
       const r = def.size / 2 - .2;
       for (let yy = Math.floor(y - r); yy < Math.ceil(y + r); yy++) for (let xx = Math.floor(x - r); xx < Math.ceil(x + r); xx++)

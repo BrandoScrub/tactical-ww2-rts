@@ -71,7 +71,12 @@ const COMBAT = (() => {
     return out;
   }
   /* pick the nearest suitable target for a weapon from position (x, y) */
+  /* a field work (cache, bunker, gun pit) as a target: only by order (CoH3 units don't fire on structures by themselves) */
+  function houseTarget(G, h) { const m = (G.hTargets || (G.hTargets = {})); return m[h.id] || (m[h.id] = { type: 'house', id: 'h' + h.id, h, x: h.x, y: h.y, def: { targetSize: 20 } }); }
+  function forcedHouse(G, e) { const h = e.forceHouse != null ? G.map.houses[e.forceHouse] : null; if (!h || h.dead || h.owner === e.owner) { e.forceHouse = null; return null; } return h; }
   function pick(G, e, w, x, y, cands, arcCentre, arcHalf) {
+    const fh = forcedHouse(G, e);
+    if (fh && w.kind !== 'indirect' && w.kind !== 'sniper' && !w.noAuto && Math.hypot(fh.x - x, fh.y - y) <= w.rng[2] + fh.w / 2 && (arcHalf == null || Math.abs(U.angNorm(Math.atan2(fh.y - y, fh.x - x) - arcCentre)) <= arcHalf)) return houseTarget(G, fh);
     const force = e.forceTarget ? G.byId.get(e.forceTarget) : null;
     const ok = o => {
       if (!o || o.dead) return false;
@@ -128,7 +133,8 @@ const COMBAT = (() => {
     sq.camo = !!(sq.def.camoInCover && sq.stillT > 2 && G.t - sq.lastFire > 4 && alive[0].cover !== 'none' && alive[0].cover !== 'negative');
     const cands = candidates(G, sq);
     // attack orders: close the distance
-    if (sq.order.type === 'attack') {
+    if (sq.order.type === 'attack' && sq.order.house != null) closeOnHouse(G, sq);
+    else if (sq.order.type === 'attack') {
       const t = G.byId.get(sq.order.target);
       if (!t || t.dead || !FOG.visible(G, sq.owner, t)) { sq.order = { type: 'idle' }; sq.forceTarget = null; }
       else {
@@ -138,7 +144,10 @@ const COMBAT = (() => {
         else if (sq.path && sq.path.length && !sq.crew) { sq.path = null; sq.slots = null; }
       }
     }
-    const vb = SIM.vetBonus(sq);
+    let vb = SIM.vetBonus(sq);
+    // a Concrete Bunker's garrison fires from prepared slits (CoH3 Fortified Combat Position)
+    const hh = sq.garrison != null ? G.map.houses[sq.garrison] : null, fort = hh && hh.pit && D.DEFENCES[hh.defId] && D.DEFENCES[hh.defId].fortified;
+    if (fort) vb = { ...vb, acc: vb.acc * fort.acc, rof: vb.rof * fort.rof };
     let fired = false;
     // the crew weapon
     const cw = SIM.weaponOf(sq);
@@ -147,8 +156,8 @@ const COMBAT = (() => {
       if (c.state === 'deployed' && !sq.barrage) {
         sq.cwCd = (sq.cwCd || 0) - dt;
         const arcHalf = cw.arc ? cw.arc / 2 * Math.PI / 180 : null;
-        let t = cw.kind === 'indirect' ? pickMortarTarget(G, sq, cw, cands) : pick(G, sq, cw, c.x, c.y, cands, c.heading, arcHalf);
-        if (!t && cw.arc && sq.order.type === 'idle') {
+        let t = cw.noAuto ? null : cw.kind === 'indirect' ? pickMortarTarget(G, sq, cw, cands) : pick(G, sq, cw, c.x, c.y, cands, c.heading, arcHalf);
+        if (!t && cw.arc && sq.order.type === 'idle' && !sq.def.bunkerGun) {
           const out = pick(G, sq, cw, c.x, c.y, cands, 0, null);
           if (out) { sq.pivotT = (sq.pivotT || 0) + dt; if (sq.pivotT > 1.5) { sq.pivotT = 0; c.state = 'setting'; c.t = (cw.setup || 2.5) * .8; c.heading = Math.atan2(out.y - c.y, out.x - c.x); } }
         } else sq.pivotT = 0;
@@ -167,7 +176,7 @@ const COMBAT = (() => {
       }
       if (sq.barrage && c.state === 'deployed') {
         const b = sq.barrage; b.t -= dt;
-        if (b.t <= 0 && b.left > 0) { lobShell(G, sq, c, cw, b.x, b.y, true, b.smoke); b.left--; b.t = b.smoke ? 1.2 : 2.2; alive[0].since = 0; fired = true; }
+        if (b.t <= 0 && b.left > 0) { lobShell(G, sq, c, cw, b.x, b.y, true, b.smoke); b.left--; b.t = b.gap || (b.smoke ? 1.2 : 2.2); alive[0].since = 0; fired = true; sq.cwFireT = G.t; }
         if (b.left <= 0) sq.barrage = null;
       }
     }
@@ -216,12 +225,22 @@ const COMBAT = (() => {
     return best;
   }
 
+  /* ordered onto a field work: get within reach of it (squads stop at their own range, vehicles at their main gun's) */
+  function closeOnHouse(G, e) {
+    const h = forcedHouse(G, e);
+    if (!h) { e.order = { type: 'idle' }; return; }
+    const R = maxRangeOf(e) * .85 + h.w / 2, d = Math.hypot(h.x - e.x, h.y - e.y);
+    if (d > R) { if (!e.path || !e.path.length || e.repathT < G.t) { SIM.setPath(G, e, h.x, h.y); e.repathT = G.t + 2; } }
+    else if (e.path && e.path.length) { e.path = null; if (e.type === 'squad') e.slots = null; if (e.crew && e.crew.state === 'packed') SIM.setup(G, e, Math.atan2(h.y - e.y, h.x - e.x)); }
+  }
+
   /* ---------------- vehicles firing ---------------- */
   function vehicleFire(G, v, dt) {
     if (v.owner < 0) return;                                   // abandoned: nobody inside
     const shocked = v.crit && v.crit.shockT > G.t, gunOut = v.crit && v.crit.gun;
     const cands = candidates(G, v), vb = SIM.vetBonus(v);
-    if (v.order.type === 'attack') {
+    if (v.order.type === 'attack' && v.order.house != null) closeOnHouse(G, v);
+    else if (v.order.type === 'attack') {
       const t = G.byId.get(v.order.target);
       if (!t || t.dead || !FOG.visible(G, v.owner, t)) { v.order = { type: 'idle' }; v.forceTarget = null; }
       else {
@@ -286,7 +305,7 @@ const COMBAT = (() => {
       if (w.kind === 'small' || w.kind === 'mg' || w.kind === 'sniper' || w.kind === 'flame') {
         if (G.rng() < (w.kind === 'mg' ? .25 : .12)) G.fx.push({ kind: 'tracer', ax: from.x, ay: from.y, bx: tm.x + (G.rng() - .5), by: tm.y + (G.rng() - .5), t: G.t, life: .12, flame: w.kind === 'flame' });
         if (w.kind === 'flame') G.fx.push({ kind: 'flame', ax: from.x, ay: from.y, bx: tm.x, by: tm.y, t: G.t, life: .3 });
-        if (G.rng() < p) damageModel(G, t, tm, w.dmg * C.dmg, src);
+        if (G.rng() < p) { if (t.def.emplaced) hitEmplacement(G, t, w.dmg * C.dmg * (w.kind === 'flame' ? 1 : EMPLACED.smallArms), src); else damageModel(G, t, tm, w.dmg * C.dmg, src); }
         else if (G.rng() < .2) G.fx.push({ kind: 'dirt', x: tm.x + G.rng.range(-1.5, 1.5), y: tm.y + G.rng.range(-1.5, 1.5), t: G.t, life: .5 });
       } else {
         // shell at infantry: a direct hit or a near miss, both explode
@@ -310,6 +329,16 @@ const COMBAT = (() => {
       }
       G.projectiles.push({ kind: w.kind === 'at' ? 'rocket' : 'shell', ax: from.x, ay: from.y, x: ax, y: ay, t0: G.t, t1: G.t + d / (w.kind === 'at' && w.name.match(/Bazooka|Panzerschreck/) ? 70 : 280),
         w, src: src.id, owner: src.owner, vs: t.id, hit, fx: from.x, fy: from.y, d });
+      return;
+    }
+    if (t.type === 'house') {
+      // small arms barely mark concrete, sandbags or a gun pit; shells and rockets land on it
+      if (w.kind === 'small' || w.kind === 'mg' || w.kind === 'flame') {
+        if (G.rng() < .2) G.fx.push({ kind: 'tracer', ax: from.x, ay: from.y, bx: t.x + G.rng.range(-1, 1), by: t.y + G.rng.range(-1, 1), t: G.t, life: .12, flame: w.kind === 'flame' });
+        if (G.rng() < Math.min(.9, acc * 6)) SIM.damageHouse(G, t.h, w.dmg * (w.kind === 'flame' ? 1 : .1), src);
+        return;
+      }
+      G.projectiles.push({ kind: w.kind === 'at' ? 'rocket' : 'shell', ax: from.x, ay: from.y, x: t.x + G.rng.range(-.6, .6), y: t.y + G.rng.range(-.6, .6), t0: G.t, t1: G.t + d / 260, w, src: src.id, owner: src.owner, vsH: t.h.id });
       return;
     }
     if (t.type === 'building') {
@@ -366,6 +395,9 @@ const COMBAT = (() => {
           if (G.rng() < Math.min(1, pen / armor)) { damageVehicle(G, v, p.w.dmg, src); G.fx.push({ kind: 'pen', x: v.x, y: v.y, t: G.t, life: .8 }); }
           else { G.fx.push({ kind: 'bounce', x: v.x, y: v.y, t: G.t, life: .5 }); if (v.owner >= 0) SIM.event(G, v.owner, 'deflect', 'Shot deflected', v.x, v.y); }
         } else G.fx.push({ kind: 'boom', x: p.x, y: p.y, t: G.t, big: .4, life: 1 });
+      } else if (p.vsH != null) {
+        const h = G.map.houses[p.vsH]; if (h && !h.dead) SIM.damageHouse(G, h, p.w.dmg * (p.w.kind === 'at' ? .6 : .8), src);
+        G.fx.push({ kind: 'boom', x: p.x, y: p.y, t: G.t, big: .6, life: 1 });
       } else if (p.vsB) {
         const b = G.byId.get(p.vsB); if (b && !b.dead) damageBuilding(G, b, p.w.dmg * (p.w.kind === 'at' ? .5 : 1), src);
         G.fx.push({ kind: 'boom', x: p.x, y: p.y, t: G.t, big: .6, life: 1 });
@@ -389,6 +421,7 @@ const COMBAT = (() => {
     for (const e of G.ents) {
       if (e.dead) continue;
       if (e.type === 'squad') {
+        if (e.def.emplaced && e.garrison != null) continue;   // its pit takes the blast (houses below)
         let near = 1e9;
         for (const m of e.models) {
           if (!m.alive) continue;
@@ -429,6 +462,14 @@ const COMBAT = (() => {
   }
 
   /* ---------------- damage ---------------- */
+  /* An emplacement is its pit: hits on the gun or crew wear the pit down (CoH3 emplacements are one structure with
+     health and armour; small arms barely mark them). Blasts reach it through the house damage in explode(). */
+  const EMPLACED = { smallArms: .25, standIn: true };
+  function hitEmplacement(G, sq, dmg, src) {
+    const h = sq.garrison != null ? G.map.houses[sq.garrison] : null;
+    hurtEvent(G, sq);
+    if (h) SIM.damageHouse(G, h, dmg, src);
+  }
   function hurtEvent(G, e) {
     if (G.t - e.lastHit > 10) {
       const what = e.type === 'vehicle' ? 'Vehicle under attack!' : e.type === 'building' ? 'Base under attack!' : 'Infantry under attack!';
@@ -444,6 +485,8 @@ const COMBAT = (() => {
   }
   function damageModel(G, sq, m, dmg, src) {
     if (!m.alive || dmg <= 0) return;
+    if (sq.def.emplaced && sq.garrison != null) return hitEmplacement(G, sq, dmg * .5, src);
+    if (sq.def.dmgTaken) dmg *= sq.def.dmgTaken;              // Stoßtruppen: 15% less damage from everything (CoH3)
     m.hp -= dmg; hurtEvent(G, sq); xpFor(G, src, sq, Math.min(dmg, m.hp + dmg));
     if (m.hp <= 0) {
       m.alive = false; m.deadT = G.t;
@@ -511,6 +554,6 @@ const COMBAT = (() => {
     for (const m of al) { if (cw && m === al[0]) { if (up) s += weaponDps(cw, t, d); continue; } if (m.weapon) s += weaponDps(D.W[m.weapon], t, d); }
     return s;
   }
-  return { weaponDps, unitDps, isLight, BLAST, RANGING, MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
+  return { EMPLACED, hitEmplacement, weaponDps, unitDps, isLight, BLAST, RANGING, MORTAR, mortarScore, isMg, isTeam, HIGH, highGround, CRIT, step, throwGrenade, facingArmor, squadCover, maxRangeOf, explode, damageModel };
 })();
 if (typeof module !== 'undefined') module.exports = COMBAT;
