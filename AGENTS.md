@@ -42,7 +42,8 @@ or the published game will not have it.
   `tools/build_art.py` refuses otherwise. A unit's heading count comes from its data entry.
 - **Art is committed.** Unit art: `tools/build_art.py` into `art/` (previews: `tools/preview_units.py art docs/previews`;
   README unit table: `tools/list_units.py`). Props (field defences, walls, hedges, trees, rock: `models/defences.py`,
-  `models/terrain.py`): `tools/build_props.py` into `art/props/`. Farmhouses (`models/scenery.py`):
+  `models/terrain.py`; field works: resource caches, the Concrete Bunker, howitzer gun pits in `models/fieldworks.py`):
+  `tools/build_props.py` into `art/props/`. Farmhouses (`models/scenery.py`):
   `tools/build_scenery.py` into `art/scenery/`; a new house footprint in `game/src/map.js` needs a variant there and in
   `HOUSE_ART`. Base buildings (`models/bases.py`): `tools/build_bases.py` into `art/bases/` (stages build33, build66, normal,
   damaged; flag recoloured per player); design review: `tools/review_bases.py`.
