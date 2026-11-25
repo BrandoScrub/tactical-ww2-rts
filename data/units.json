@@ -68,5 +68,16 @@
  "de_sapper": {"kind": "man", "side": "de", "name": "engineer, shovel", "headings": 8, "art": "de_sapper"},
  "de_sniper": {"kind": "man", "side": "de", "name": "sniper, scoped rifle", "headings": 8, "art": "de_sniper"},
  "de_tripod_carrier": {"kind": "man", "side": "de", "name": "loader carrying the tripod", "headings": 8, "art": "de_tripod_carrier"},
- "de_tube_carrier": {"kind": "man", "side": "de", "name": "mortar gunner carrying the tube", "headings": 8, "art": "de_tube_carrier"}
+ "de_tube_carrier": {"kind": "man", "side": "de", "name": "mortar gunner carrying the tube", "headings": 8, "art": "de_tube_carrier"},
+ "us_fast_tank_destroyer": {"kind": "vehicle", "side": "us", "name": "M18 Hellcat", "headings": 16, "art": "us_fast_tank_destroyer"},
+ "us_dozer_tank": {"kind": "vehicle", "side": "us", "name": "M4(105) Sherman dozer", "headings": 16, "art": "us_dozer_tank"},
+ "de_tracked_scout": {"kind": "vehicle", "side": "de", "name": "Kettenkrad", "headings": 16, "art": "de_tracked_scout"},
+ "de_scout_car": {"kind": "vehicle", "side": "de", "name": "Sd.Kfz. 221", "headings": 16, "art": "de_scout_car"},
+ "de_tank_destroyer": {"kind": "vehicle", "side": "de", "name": "Marder III M", "headings": 16, "art": "de_tank_destroyer"},
+ "de_anti_aircraft_tank": {"kind": "vehicle", "side": "de", "name": "Wirbelwind", "headings": 16, "art": "de_anti_aircraft_tank"},
+ "de_assault_tank": {"kind": "vehicle", "side": "de", "name": "Sturmpanzer IV Brummbaer", "headings": 16, "art": "de_assault_tank"},
+ "de_anti_aircraft_gun": {"kind": "crew weapon", "side": "de", "name": "2 cm Flak 30", "headings": 8, "art": "de_anti_aircraft_gun"},
+ "de_anti_aircraft_gun_limbered": {"kind": "crew weapon", "side": "de", "name": "2 cm Flak 30 on its trailer", "headings": 8, "art": "de_anti_aircraft_gun_limbered"},
+ "de_rocket_launcher": {"kind": "crew weapon", "side": "de", "name": "Nebelwerfer", "headings": 8, "art": "de_rocket_launcher"},
+ "de_rocket_launcher_limbered": {"kind": "crew weapon", "side": "de", "name": "Nebelwerfer, trails closed for moving", "headings": 8, "art": "de_rocket_launcher_limbered"}
 }

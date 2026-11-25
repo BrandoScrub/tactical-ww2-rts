@@ -26,6 +26,7 @@ const targets = ['us_riflemen', 'de_grenadiers', 'us_jeep', 'de_222', 'us_sherma
 for (const id of ids) {
   const u = stub(id), w = (u.def.crewWeapon ? [u.def.weapons[0]] : u.def.weapons).map(k => D.W[k]);
   if (w.some(x => x && x.kind === 'indirect')) continue;
+  if (!w.length) continue;                                   // unarmed (the Kettenkrad)
   if (!targets.some(t => [5, 15, 30].some(d => COMBAT.unitDps(u, t, d) > 0))) fail(`${id} can hurt nothing`);
 }
 

@@ -4,7 +4,7 @@ import math
 import numpy as np
 from artkit.figure import material, Clip, keyframes
 from artkit.parts.trooper import trooper_clips, sighted
-from . import us_vehicles, de_vehicles, us_vehicles2, de_vehicles2, finish, infantry as I
+from . import us_vehicles, de_vehicles, us_vehicles2, de_vehicles2, new_vehicles, finish, infantry as I
 
 material('us_jump', (164, 150, 108), 'canvas'); material('de_smock', (118, 104, 70), 'canvas')      # airborne jump suit; camouflage smock
 
@@ -16,7 +16,7 @@ texture_cloth()
 
 # ---- vehicles
 # Weapons that stand still in play keep 8 headings; everything that drives gets 16 (long hulls show the snap at 8).
-STATIC = ('anti_tank_gun', 'tripod_mg', 'mortar', 'howitzer')
+STATIC = ('anti_tank_gun', 'tripod_mg', 'mortar', 'howitzer', 'anti_aircraft_gun', 'rocket_launcher')
 
 
 def headings_for(key):
@@ -42,12 +42,15 @@ def vehicles(side):
     V = us_vehicles if side == 'us' else de_vehicles
     out = []
     V2 = us_vehicles2 if side == 'us' else de_vehicles2
-    for role, name, fn in V.ALL + V2.ALL:
+    for role, name, fn in V.ALL + V2.ALL + (new_vehicles.US if side == 'us' else new_vehicles.DE):
         key = f"{side}_{role.replace(' ', '_').replace('-', '_')}"
         out.append((key, role, name, paint(finish.apply(fn(), key), side, camo=key in finish.CAMO)))
     gun = V.at57 if side == 'us' else V.pak40
     k = f'{side}_anti_tank_gun_limbered'
     out.append((k, 'crew weapon', 'anti-tank gun, trails closed for moving', paint(finish.apply(gun(deployed=False), k), side, camo=k in finish.CAMO)))
+    if side == 'de':
+        for suffix, name, fn in new_vehicles.LIMBERED:
+            k = f'de_{suffix}'; out.append((k, 'crew weapon', name, paint(finish.apply(fn(), k), side, camo=k in finish.CAMO)))
     for name, fn in (('tripod_mg', I.tripod_mg), ('mortar', I.mortar)):
         mm = fn(side == 'de'); out.append((f'{side}_{name}', 'crew weapon', mm.name, paint(mm, side)))
     return out
@@ -109,6 +112,12 @@ def men(side):
 # degrees relative to the weapon (multiples of 45, so an 8-heading sprite exists for every weapon heading). artkit units: 160 a tile. Written to art/crew_layout.json by layout.py.
 CREW_AT = {'at_gunner': (-25, 32, 0), 'at_loader': (-50, -34, 45), 'at_commander': (-95, 55, 0)}
 PUSH_AT = {'pusher#1': (-150, 15, 0), 'pusher#2': (-150, -15, 0)}
+# 2 cm Flak 30: the gunner on the seat behind the breech, a loader with magazines on the left, the commander behind
+FLAK_AT = {'mg_gunner': (-47, 0, 0), 'loader_box': (-6, 44, -90), 'at_commander': (-90, -50, 0)}
+PUSH_FLAK = {'pusher#1': (-110, 14, 0), 'pusher#2': (-110, -14, 0)}
+# Nebelwerfer: the crew stand back and to the sides (it is fired by cable); a loader with the next rocket
+NEBEL_AT = {'at_commander': (-80, 70, 0), 'loader_rocket': (-70, -60, 45), 'loader_box': (-120, 30, 0)}
+PUSH_NEBEL = {'pusher#1': (-130, 15, 0), 'pusher#2': (-130, -15, 0)}
 BREECH = (-44, 0, 44)                      # where the shell goes in
 
 
@@ -183,6 +192,8 @@ def layout(side):
         f'{side}_tripod_mg': dict(crew=rel(f'{side}_tripod_mg', {'mg_gunner': (back - 30, 0, 0), 'loader_box': (-14, 34, 0)}), moving=dict(weapon=None, crew=[dict(unit=f'{side}_mg_carrier'), dict(unit=f'{side}_tripod_carrier')])),
         f'{side}_howitzer': dict(crew=rel(f'{side}_howitzer', CREW_AT)),
         f'{side}_rocket_gunner': dict(crew=[dict(unit=f'{side}_loader_rocket', x=-34, y=-34, heading=0)]),
+        **({'de_anti_aircraft_gun': dict(crew=rel('de_anti_aircraft_gun', FLAK_AT), moving=dict(weapon='de_anti_aircraft_gun_limbered', crew=rel('de_anti_aircraft_gun_limbered', PUSH_FLAK))),
+            'de_rocket_launcher': dict(crew=rel('de_rocket_launcher', NEBEL_AT), moving=dict(weapon='de_rocket_launcher_limbered', crew=rel('de_rocket_launcher_limbered', PUSH_NEBEL)))} if not us else {}),
     }
 
 

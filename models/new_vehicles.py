@@ -1,7 +1,6 @@
 """The units CoH3's core rosters field that the game had no art for: grey blockouts (primary and secondary masses), one
 Machine each, check() empty. Briefs follow artkit/DESIGN_METHOD.md; real dimensions x 55 (kit.M).
-Not in the roster yet (models/roster.py, data/units.json): they go in once the blockouts are agreed, then get their
-finishing pass (models/finish.py) like the rest.
+In the roster since the blockouts were agreed (2026-11-24); finished in models/finish.py like the rest.
 
   US   M18 Hellcat (Tank Depot; the M10 stands in), M4(105) Sherman with the M1 dozer blade (Tank Depot)
   DE   Kettenkrad (HQ; the motorcycle stands in), Sd.Kfz. 221 (Luftwaffe Kp.; the 222 stands in), Marder III M
@@ -283,7 +282,7 @@ def brummbaer():
     return m
 
 
-def flak30():
+def flak30(deployed=True):
     """Brief
     is:       2 cm Flak 30 anti-aircraft gun on its ground mount, crew of 5 (figures separate)
     does:     the Luftwaffe Kompanie's team weapon in CoH3: fast 20 mm fire against infantry and light vehicles, and aircraft
@@ -319,10 +318,21 @@ def flak30():
     m.add('magazine', slab(-0.24, 0.04, 0.24, 0.44, 0.92, 1.06, 'steel'), 'box magazine sticking out of the left of the receiver: 20 rounds, changed constantly', on='cheek_l', small_ok=True)
     m.add('seat_arm', slab(-0.80, -0.30, -0.05, 0.05, 0.36, 0.46, 'steel'), 'arm carrying the gunner behind the breech: he turns with the gun', on='mount', small_ok=True)
     m.add('seat', slab(-0.98, -0.72, -0.17, 0.17, 0.46, 0.54, 'steel'), "gunner's seat: the human-scale cue", on='seat_arm')
+    if not deployed:
+        # on its two-wheel trailer (Sd.Ah. 51) for moving: the platform lifted clear of the ground, feet up, a drawbar
+        for k in range(3): del m.parts[f'foot_{k}']
+        lift = 0.20
+        for q in m.parts.values(): q.geom = q.geom.move(0, 0, lift * M)
+        m.name += ', on its trailer'
+        wr = 0.34
+        m.add('trailer_axle', rod((0.05, -0.80, wr), (0.05, 0.80, wr), 0.06), 'trailer axle under the platform: the gun rides on it between positions', on='base', small_ok=True)
+        for sd, s in ((1, 'l'), (-1, 'r')):
+            m.add(f'wheel_{s}', wheel(0.05, sd * 0.86, wr, wr, 0.14), 'trailer wheel', on='trailer_axle', turns=(P(0.05, sd * 0.86, wr), ACROSS))
+        m.add('drawbar', rod((-0.68, 0, 0.37), (-1.70, 0, 0.30), 0.045), 'drawbar: hooked to a tractor, or pushed by the crew', on='base', small_ok=True)
     return m
 
 
-def nebelwerfer():
+def nebelwerfer(deployed=True):
     """Brief
     is:       15 cm Nebelwerfer 41 six-barrelled rocket launcher on its split-trail carriage (CoH3's Nebelwerfer 42), crew of 4
     does:     a salvo of six rockets on an area: breaks up infantry, team weapons and emplacements; long reload, short life
@@ -344,12 +354,12 @@ def nebelwerfer():
     for sd, s in ((1, 'l'), (-1, 'r')):
         m.add(f'wheel_{s}', wheel(0, sd * wy, wr, wr, ww), 'carriage wheel', on='axle', turns=(P(0, sd * wy, wr), ACROSS))
         m.add(f'hub_{s}', sh.cyl(P(0, sd * wy, wr), P(0, sd * (wy + ww / 2 + 0.04), wr), 0.4 * wr * M, 'steel', seg=12), 'hub', on=f'wheel_{s}', turns=(P(0, sd * wy, wr), ACROSS))
-        m.add(f'trail_{s}', rod((-0.16, sd * 0.24, wr + 0.04), (-2.10, sd * 0.80, 0.07), 0.05), 'trail: spreads to steady the carriage', on='saddle', small_ok=True)
-        y0, y1 = sorted((sd * 0.68, sd * 0.92))
+        m.add(f'trail_{s}', rod((-0.16, sd * 0.24, wr + 0.04), (-2.10, sd * (0.80 if deployed else 0.14), 0.07), 0.05), 'trail: spreads to steady the carriage', on='saddle', small_ok=True)
+        y0, y1 = sorted((sd * 0.68, sd * 0.92)) if deployed else sorted((sd * 0.03, sd * 0.26))
         m.add(f'spade_{s}', slab(-2.22, -2.06, y0, y1, 0.0, 0.22, 'steel'), 'spade: digs in so the salvo does not shift it', on=f'trail_{s}')
         y0, y1 = sorted((sd * 0.34, sd * 0.42))
         m.add(f'post_{s}', slab(-0.08, 0.08, y0, y1, wr + 0.04, 1.10, 'steel'), 'trunnion post: the tube cluster elevates between the pair', on='saddle')
-    e = math.radians(28); d = (math.cos(e), 0.0, math.sin(e)); n = (-math.sin(e), 0.0, math.cos(e)); T = (0.0, 0.0, 1.00)
+    e = math.radians(28 if deployed else 4); d = (math.cos(e), 0.0, math.sin(e)); n = (-math.sin(e), 0.0, math.cos(e)); T = (0.0, 0.0, 1.00)
     def at(a, r=0.0, ang=0.0):
         cy, cz = r * math.cos(ang), r * math.sin(ang)
         return (T[0] + a * d[0] + cz * n[0], cy, T[2] + a * d[2] + cz * n[2])
@@ -358,11 +368,15 @@ def nebelwerfer():
         ang = math.radians(90 + 60 * k)
         m.add('gun' if k == 0 else f'tube_{k}', rod(at(-0.55, 0.20, ang), at(0.80, 0.20, ang), 0.095, 'hull', seg=10),
               'launch tube, open both ends: six in a ring, the shape nobody mistakes for a gun', on='band')
-    m.add('prop', rod((0.30, 0, 0.0), (0.22, 0, wr - 0.04), 0.045), 'front prop under the saddle: takes the weight off the wheels when firing', on='saddle', small_ok=True)
+    if deployed: m.add('prop', rod((0.30, 0, 0.0), (0.22, 0, wr - 0.04), 0.045), 'front prop under the saddle: takes the weight off the wheels when firing', on='saddle', small_ok=True)
     return m
 
 
-ALL = [('tank destroyer m18', 'M18 Hellcat', hellcat), ('dozer tank', 'M4(105) Sherman dozer', dozer_sherman),
-       ('tracked scout', 'Kettenkrad', kettenkrad), ('scout car', 'Sd.Kfz. 221', sdkfz221), ('tank destroyer', 'Marder III M', marder3),
-       ('anti-aircraft tank', 'Wirbelwind', wirbelwind), ('assault tank', 'Brummbaer', brummbaer),
-       ('anti-aircraft gun', '2 cm Flak 30', flak30), ('rocket launcher', 'Nebelwerfer', nebelwerfer)]
+US = [('fast tank destroyer', 'M18 Hellcat', hellcat), ('dozer tank', 'M4(105) Sherman dozer', dozer_sherman)]
+DE = [('tracked scout', 'Kettenkrad', kettenkrad), ('scout car', 'Sd.Kfz. 221', sdkfz221), ('tank destroyer', 'Marder III M', marder3),
+      ('anti-aircraft tank', 'Wirbelwind', wirbelwind), ('assault tank', 'Sturmpanzer IV Brummbaer', brummbaer),
+      ('anti-aircraft gun', '2 cm Flak 30', flak30), ('rocket launcher', 'Nebelwerfer', nebelwerfer)]
+# towed pieces as they move: (key suffix, name, builder)
+LIMBERED = [('anti_aircraft_gun_limbered', '2 cm Flak 30 on its trailer', lambda: flak30(deployed=False)),
+            ('rocket_launcher_limbered', 'Nebelwerfer, trails closed for moving', lambda: nebelwerfer(deployed=False))]
+ALL = US + DE + [('crew weapon', n, f) for _, n, f in LIMBERED]

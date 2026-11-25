@@ -34,9 +34,9 @@ or the published game will not have it.
   webbing and role marks in `models/infantry.py`. Markings and the German camouflage tile are drawn by
   `tools/make_markings.py` (into `styles/ww2/decals/` and `styles/ww2/tiles/de_camo.jpg`). Look before exporting:
   `python3 tools/review_units.py <out> [key ...]` (vehicles) and `... <out> men` (infantry), close and at play size.
-- **Units waiting for approval** are grey blockouts in `models/new_vehicles.py` (checked by `tools/check.py`, not in the
-  roster or the game). Review sheets: `docs/previews/new_units_blockouts_*.png`. Once agreed, a unit moves into the roster
-  (`models/roster.py`, `data/units.json`), gets its finishing pass and is exported.
+- **The units added on 2026-11-24** (Hellcat, dozer Sherman, Kettenkrad, 221, Marder III, Wirbelwind, Brummbär, Flak 30,
+  Nebelwerfer) have their blockouts in `models/new_vehicles.py` and their finishing pass in `models/finish.py`, like the
+  rest. A new unit starts the same way: a grey blockout there, shown to the owner, then roster, finish, export.
 - **Aircraft and parachutes** (air call-ins; not in the game yet). Aircraft blockouts: `models/aircraft.py`; their finishing
   pass and paint: `models/air_finish.py` (`aircraft.finished(key)`). Parachute rigs, three stages each (opening, open,
   landed): `models/parachutes.py`. Their markings and paints: `python3 tools/make_markings.py air`. Look before exporting:
