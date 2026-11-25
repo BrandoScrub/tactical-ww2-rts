@@ -6,12 +6,12 @@ const AI = (() => {
   const D = DATA;
   /* unit wishes by phase: [unit, weight]; tech follows FACTIONS[side].buildings */
   const PLAN = {
-    de: { early: [['de_grenadiers', 3], ['de_hmg', 2.2], ['de_mortar', 1.2], ['de_pioneers', .4], ['de_bike', .5]], mid: [['de_grenadiers', 2], ['de_hmg', 1.2], ['de_mortar', 1.2], ['de_schreck', 1.5], ['de_222', 2], ['de_pz2', 1.5], ['de_panzergrenadiers', 2], ['de_at_gun', 1.2], ['de_stug', 2], ['de_251', .4], ['de_sniper', .5]], late: [['de_pz4', 3], ['de_panther', 2], ['de_tiger', .8], ['de_stoss', 1.5], ['de_stug', 2], ['de_panzergrenadiers', 1.5], ['de_grenadiers', 1.5], ['de_at_gun', 1], ['de_pz2', 1]] },
-    us: { early: [['us_riflemen', 3], ['us_hmg', 2], ['us_mortar', 1.2], ['us_engineers', .4], ['us_jeep', .6], ['us_scouts', .5]], mid: [['us_riflemen', 2], ['us_hmg', 1.2], ['us_mortar', 1.2], ['us_bazooka', 1.5], ['us_m8', 2], ['us_at_gun', 1.2], ['us_halftrack', .4], ['us_sniper', .5], ['us_chaffee', 1.5], ['us_stuart', 1.2]], late: [['us_sherman', 3], ['us_m10', 2], ['us_pershing', 1.2], ['us_riflemen', 2], ['us_at_gun', 1], ['us_bazooka', 1]] },
+    de: { early: [['de_grenadiers', 3], ['de_hmg', 2.2], ['de_mortar', 1.2], ['de_pioneers', .4], ['de_bike', .2], ['de_kettenkrad', .3]], mid: [['de_grenadiers', 2], ['de_hmg', 1.2], ['de_mortar', 1.2], ['de_schreck', 1.5], ['de_221', 1.2], ['de_222', 1.2], ['de_pz2', 1.2], ['de_marder', 1.2], ['de_flak30', .6], ['de_wirbelwind', 1], ['de_nebel', .7], ['de_panzergrenadiers', 2], ['de_at_gun', 1.2], ['de_stug', 2], ['de_251', .4], ['de_sniper', .5]], late: [['de_pz4', 3], ['de_brummbaer', 1], ['de_wirbelwind', .8], ['de_panther', 2], ['de_tiger', .8], ['de_stoss', 1.5], ['de_stug', 2], ['de_panzergrenadiers', 1.5], ['de_grenadiers', 1.5], ['de_at_gun', 1], ['de_pz2', 1]] },
+    us: { early: [['us_riflemen', 3], ['us_hmg', 2], ['us_mortar', 1.2], ['us_engineers', .4], ['us_jeep', .6], ['us_scouts', .5]], mid: [['us_riflemen', 2], ['us_hmg', 1.2], ['us_mortar', 1.2], ['us_bazooka', 1.5], ['us_m8', 2], ['us_at_gun', 1.2], ['us_halftrack', .4], ['us_sniper', .5], ['us_chaffee', 1.5], ['us_stuart', 1.2]], late: [['us_sherman', 3], ['us_hellcat', 1.5], ['us_dozer', 1], ['us_m10', 1.2], ['us_pershing', 1.2], ['us_riflemen', 2], ['us_at_gun', 1], ['us_bazooka', 1]] },
   };
   /* a house or field work a squad can go into: not a cache, a gun pit or a converted bunker */
   const holdable = h => !h.noGarrison && !h.role;
-  const CAP = { de_tiger: 1, us_pershing: 1, de_stoss: 2, us_scouts: 1, de_bike: 1, us_jeep: 1, de_mortar: 2, us_mortar: 2, de_hmg: 2, us_hmg: 2, de_sniper: 1, us_sniper: 1, de_251: 1, us_halftrack: 1 };
+  const CAP = { de_brummbaer: 1, de_wirbelwind: 1, de_nebel: 1, de_flak30: 1, de_kettenkrad: 1, us_dozer: 1, de_tiger: 1, us_pershing: 1, de_stoss: 2, us_scouts: 1, de_bike: 1, us_jeep: 1, de_mortar: 2, us_mortar: 2, de_hmg: 2, us_hmg: 2, de_sniper: 1, us_sniper: 1, de_251: 1, us_halftrack: 1 };
   /* fighting vehicles (fuel cost, not a transport) wanted before teching to tier 3 and 4: without this the AI saved its
      fuel for the next building for the whole game and never fielded a vehicle */
   const VEH_BEFORE_TECH = [0, 0, 1, 2];
@@ -531,7 +531,7 @@ const AI = (() => {
     const inf = stub(foe + (foe === 'us' ? '_riflemen' : '_grenadiers')), tank = stub(foe + (foe === 'us' ? '_sherman' : '_pz4'));
     const vsTank = COMBAT.unitDps(me, tank, 15) > COMBAT.unitDps(me, inf, 15) * 1.5;
     const w = (def.crewWeapon ? [def.weapons[0]] : def.weapons).map(k => D.W[k]);
-    if (w.some(x => x && x.kind === 'indirect')) return (bestCache[defId] = { d: null, vs: 'indirect', what: 'artillery: 25 m and out, needs no sight line' });
+    if (w.some(x => x && x.kind === 'indirect')) return (bestCache[defId] = { d: null, vs: 'indirect', what: 'artillery: ' + (w.find(x => x && x.kind === 'indirect').minRange || 25) + ' m and out, needs no sight line' });
     const p = rangePlan(null, me, vsTank ? tank : inf, []);
     return (bestCache[defId] = p && { d: p.d, vs: vsTank ? 'armour' : 'infantry' });
   }
@@ -686,7 +686,7 @@ const AI = (() => {
         if (hurt) { SIM.issue(G, [e.id], { type: 'repair', target: hurt.id }); continue; }
       }
       // anti-tank: go for visible vehicles
-      const atWeapon = e.type === 'squad' ? e.models.some(m => m.alive && m.weapon && D.W[m.weapon].kind === 'at') || (SIM.weaponOf(e) && SIM.weaponOf(e).kind === 'at') : D.W[e.def.weapons[0]].kind === 'cannon' && D.W[e.def.weapons[0]].pen[0] >= 150;
+      const atWeapon = e.type === 'squad' ? e.models.some(m => m.alive && m.weapon && D.W[m.weapon].kind === 'at') || (SIM.weaponOf(e) && SIM.weaponOf(e).kind === 'at') : !!e.def.weapons.length && D.W[e.def.weapons[0]].kind === 'cannon' && D.W[e.def.weapons[0]].pen[0] >= 150;
       if (atWeapon) {
         const tv = visibleEnemies.filter(v => v.type === 'vehicle').sort((a, b) => U.dist2(a.x, a.y, e.x, e.y) - U.dist2(b.x, b.y, e.x, e.y))[0];
         if (tv && U.dist2(tv.x, tv.y, e.x, e.y) < 60 * 60) { if (e.order.type !== 'attack' || e.order.target !== tv.id) { if (e.crew) { if (e.crew.state === 'packed') SIM.issue(G, [e.id], { type: 'setup', heading: Math.atan2(tv.y - e.y, tv.x - e.x) }); } else SIM.issue(G, [e.id], { type: 'attack', target: tv.id }); } continue; }
@@ -717,7 +717,7 @@ const AI = (() => {
       }
       // grenades at enemies in cover
       if (e.type === 'squad' && e.def.abilities && (me.res.mu > 40 || e.crew)) {   // the HE barrage is free
-        const ab = e.def.abilities.find(a => a !== 'barrage' && a !== 'breach' && !D.ABILITIES[a].smoke && (e.cooldowns[a] || 0) < G.t);
+        const ab = e.def.abilities.find(a => !D.ABILITIES[a].shots && a !== 'breach' && !D.ABILITIES[a].smoke && (e.cooldowns[a] || 0) < G.t);
         if (ab) {
           const A = D.ABILITIES[ab];
           const tgt = visibleEnemies.find(o => o.type === 'squad' && U.dist2(o.x, o.y, e.x, e.y) < (A.range - 2) ** 2 && U.dist2(o.x, o.y, e.x, e.y) > ((A.minRange || 6) + 1) ** 2 && (COMBAT.squadCover(G, o) === 'heavy' || o.def.crewWeapon));
@@ -737,12 +737,13 @@ const AI = (() => {
           const gs = visibleEnemies.find(o => o.type === 'squad' && o.garrison != null && U.dist2(o.x, o.y, e.x, e.y) < 35 * 35);
           if (gs && G.rng() < .6) { SIM.issue(G, [e.id], { type: 'ability', id: 'breach', x: gs.x, y: gs.y }); continue; }
         }
-        if (e.def.abilities.includes('barrage') && (e.cooldowns.barrage || 0) < G.t && e.crew && e.crew.state === 'deployed') {
+        const bar = e.def.abilities.find(a => D.ABILITIES[a].shots && !D.ABILITIES[a].smoke);   // the mortar's barrage, the Nebelwerfer's salvo
+        if (bar && (e.cooldowns[bar] || 0) < G.t && e.crew && e.crew.state === 'deployed') {
           // a set-up machine gun first, then other team weapons, then squads that have sat in cover or a building for a few seconds
-          const A = D.ABILITIES.barrage, cx = e.crew.x, cy = e.crew.y;
+          const A = D.ABILITIES[bar], cx = e.crew.x, cy = e.crew.y;
           const inReach = o => o.type === 'squad' && !o.retreating && !o.moving && U.dist2(o.x, o.y, cx, cy) < (A.range - 2) ** 2 && U.dist2(o.x, o.y, cx, cy) > ((A.minRange || 25) + 2) ** 2;
           const tgt = visibleEnemies.find(o => inReach(o) && COMBAT.isMg(o)) || visibleEnemies.find(o => inReach(o) && COMBAT.isTeam(o)) || visibleEnemies.find(o => inReach(o) && (o.coverT || 0) >= COMBAT.MORTAR.dugIn);
-          if (tgt) { SIM.issue(G, [e.id], { type: 'ability', id: 'barrage', x: tgt.x, y: tgt.y }); continue; }
+          if (tgt) { SIM.issue(G, [e.id], { type: 'ability', id: bar, x: tgt.x, y: tgt.y }); continue; }
         }
         // nothing worth shelling in reach, but an enemy machine gun or dug-in squad in sight a little further: move up behind it to range
         if (e.crew && SIM.weaponOf(e) && SIM.weaponOf(e).kind === 'indirect' && (e.mortarT || 0) < G.t && !(e.crew.state === 'deployed' && G.t - e.lastFire < 6)) {
@@ -771,7 +772,7 @@ const AI = (() => {
       // fight from the best distance, by a safe way
       if (e.type !== 'vehicle' || !e.def.reinforces) { if (engage(G, me, S, e, visibleEnemies, pts)) continue; }
       // a tank or gun with nothing to fight near it shells an enemy cache, bunker or gun pit it can see
-      if (e.type === 'vehicle' && e.order.type !== 'attack' && D.W[e.def.weapons[0]].kind === 'cannon' && !visibleEnemies.some(o => U.dist2(o.x, o.y, e.x, e.y) < 45 * 45)) {
+      if (e.type === 'vehicle' && e.order.type !== 'attack' && e.def.weapons.length && D.W[e.def.weapons[0]].kind === 'cannon' && !visibleEnemies.some(o => U.dist2(o.x, o.y, e.x, e.y) < 45 * 45)) {
         const h = G.map.houses.find(h => h.pit && !h.dead && h.owner === enemy && h.built >= 1 && (h.cache || h.bunker || h.gun) && FOG.seen(G, slot, h.x, h.y) && U.dist2(h.x, h.y, e.x, e.y) < 60 * 60);
         if (h) { SIM.issue(G, [e.id], { type: 'attack', house: h.id }); continue; }
       }

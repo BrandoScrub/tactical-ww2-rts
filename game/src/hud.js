@@ -163,7 +163,7 @@ const HUD = (() => {
     const e = sel[0], P = G.players[0];
     if (e.type === 'building') {
       if (e.built < 1) return out;
-      const keys = [0, 1, 2, 3, 4, 5];
+      const keys = [0, 1, 2, 3, 4, 5, 6];
       e.def.produce.forEach((u, i) => {
         const def = SIM.unitDef(u), why = SIM.prodBlock(G, e, u);
         out[keys[i]] = { img: unitIcon(u), label: def.name, tip: `<b>${def.name}</b><div class="role">${def.role}</div>${clsLine(def)}${rangeLine(u)}${def.standIn ? '<div class="note">Stand-in: ' + def.standIn + '</div>' : ''}<div>${costStr(def.cost)} &middot; ${def.pop} pop &middot; ${def.time}s</div>`, cost: def.cost, disabled: !!why, why, act: () => issue(G, [e.id], { type: 'produce', unit: u }) };

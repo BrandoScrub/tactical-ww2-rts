@@ -1137,9 +1137,10 @@ const SIM = (() => {
   function crush(G, v) {
     for (const c of MAP.coversNear(G.map, v.x, v.y)) {
       if (!c.alive) continue;
-      const can = c.kind === 'wire' || (!v.def.soft && (c.kind === 'sandbags' || c.kind === 'hedge'));
+      const can = c.kind === 'wire' || (!v.def.soft && (c.kind === 'sandbags' || c.kind === 'hedge')) || (v.def.dozer && (c.kind === 'tanktrap' || c.kind === 'wall'));
       if (!can) continue;
-      const reach = v.def.width * .5 + .3;
+      // a dozer blade reaches ahead of the tank, so it breaks tank traps it can't drive over
+      const reach = v.def.dozer ? v.def.length * .5 + 1.6 : v.def.width * .5 + .3;
       if (U.segDist2(v.x, v.y, c.ax, c.ay, c.bx, c.by) >= reach * reach) continue;
       // only the pieces under the tracks go flat; the rest of the line stays standing
       let near = -1, nd = 1e9;

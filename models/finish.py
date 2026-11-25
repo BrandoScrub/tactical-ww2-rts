@@ -328,15 +328,101 @@ def tiger(m):
     aerial(m, 'aerial', 0.25, -1.60, 1.82, 1.7, 'upper_hull', lean=0.3)
 
 
+# ================================================================ the units added 2026-11-24 (models/new_vehicles.py)
+def hellcat(m):
+    RX, tz = 2.55, 1.74
+    gz = lambda x: 1.68 - (x - 3.95) * (0.53 / 1.33)
+    through = ('well', 'ring_guard', 'upper_hull')
+    for sd, s in SIDES:
+        mark(m, f'star_{s}', 'us_star', (1.45, sd * 1.225, 1.415), (0, sd * 0.53, 0.41), 0.44, 0.44, 'upper_hull', STAR)
+        lamp(m, f'lamp_{s}', 4.50, sd * 0.95, gz(4.57) + 0.095, 'upper_hull')
+    mark(m, 'glacis_star', 'us_star', (4.65, 0, gz(4.65)), (0.53, 0, 1.33), 0.50, 0.50, 'upper_hull', STAR)
+    mark(m, 'deck_grille', 'deck_slats', (0.92, 0, 1.72), UP, 1.50, 0.82, 'engine_grille', GRILLE)
+    crew(m, 'commander', 'us', RX - 0.25, 0.30, tz + 0.60, 'turret', through=through + ('lower_hull',))
+    crew(m, 'loader', 'us', RX - 0.02, -0.32, tz + 0.60, 'turret', through=through + ('lower_hull',), show=0.42)
+    roll(m, 'bustle_roll', (RX - 1.82, -0.46, tz + 0.36), (RX - 1.82, 0.46, tz + 0.36), 0.09, 'bustle')
+    aerial(m, 'aerial', 0.42, -0.92, 1.68, 1.6, 'upper_hull', lean=0.3)
+
+
+def dozer_sherman(m):
+    sherman(m)
+
+
+def kettenkrad(m):
+    mark(m, 'plate', 'de_plate', (0.12, 0, 0.73), (-1, 0, 0), 0.44, 0.16, 'body', 'number plate on the tail')
+    roll(m, 'bench_roll', (0.36, -0.40, 0.90), (0.36, 0.40, 0.90), 0.08, 'body', why='bedroll and cable drum on the rear bench: it carried wire and kit forward')
+
+
+def sdkfz221(m):
+    sdkfz222(m)
+
+
+def marder3(m):
+    for sd, s in SIDES:
+        mark(m, f'cross_{s}', 'de_cross', (1.05, sd * 0.935, 1.80), (0, sd * 0.84, 0.16), 0.34, 0.34, f'side_{s}', CROSS)
+    crew(m, 'gunner', 'de', 0.95, 0.44, 2.22, 'floor', through=('upper_hull', 'lower_hull'), show=0.72, why='gunner standing in the open compartment: the scale cue, and it says nothing covers them')
+    crew(m, 'loader', 'de', 0.55, -0.42, 2.22, 'floor', through=('upper_hull', 'lower_hull'), show=0.62, why='loader behind the breech')
+    m.add('spare_tracks', solid(across([(3.90, 1.085), (4.40, 0.94), (4.42, 1.005), (3.92, 1.15)], -0.45, 0.45), 'steel'),
+          'spare track links on the nose: extra armour on thin plate, a dark band across the front', on='lower_hull')
+    lamp(m, 'lamp', 4.05, 0.90, 1.21, 'mudguard_l', r=0.08)
+    aerial(m, 'aerial', 0.30, 0.79, 2.20, 1.3, 'side_l', lean=0.25)
+
+
+def _pz4_hull_finish(m):
+    for sd, s in SIDES:
+        mark(m, f'deck_grille_{s}', 'deck_slats', (0.82, sd * 0.72, 1.70), UP, 1.00, 1.00, 'upper_hull', GRILLE)
+    lamp(m, 'lamp', 5.25, 1.20, 1.37, 'mudguard_l')
+    aerial(m, 'aerial', 0.32, -1.30, 1.70, 1.5, 'upper_hull', lean=0.3)
+    m.add('spare_tracks', solid(across([(4.45, 1.245), (5.45, 1.065), (5.47, 1.13), (4.47, 1.31)], -0.55, 0.55), 'steel'), 'spare track links laid on the glacis: extra armour, and a dark band across the nose', on='lower_hull')
+
+
+def wirbelwind(m):
+    _pz4_hull_finish(m)
+    rx, tz = 2.85, 1.76
+    for sd, s in SIDES:
+        mark(m, f'cross_{s}', 'de_cross', (1.20, sd * 1.42, 1.48), (0, sd, 0), 0.34, 0.34, 'upper_hull', CROSS)
+    for k, x in enumerate((0.70, 1.28)):
+        m.add(f'spare_wheel_{k}', wheel(x, 1.46, 1.48, 0.235, 0.08), 'spare road wheel on the hull side: small wheels wear out', on='upper_hull')
+    crew(m, 'gunner', 'de', rx - 0.10, 0.34, tz + 1.02, 'turret', through=('well', 'ring_guard', 'upper_hull'), show=0.40, why='gun crew in the open turret: heads over the rim say it has no roof')
+    crew(m, 'loader', 'de', rx - 0.30, -0.36, tz + 1.02, 'turret', through=('well', 'ring_guard', 'upper_hull'), show=0.34, why='loader with the next magazines')
+
+
+def brummbaer(m):
+    _pz4_hull_finish(m)
+    for sd, s in SIDES:
+        y0, y1 = sorted((sd * 1.42, sd * 1.53))
+        m.add(f'skirt_rail_{s}', slab(0.45, 4.78, y0, y1, 1.62, 1.67, 'steel'), 'rail along the hull side: the skirt plates hang on it', on='upper_hull', small_ok=True)
+        for k in range(4):
+            if sd > 0 and k == 3: continue                       # one plate lost
+            x0 = 0.50 + 1.07 * k
+            y0, y1 = sorted((sd * 1.49, sd * 1.53))
+            m.add(f'skirt_{s}{k}', slab(x0, x0 + 1.02, y0, y1, 0.80, 1.68), 'Schürzen plate hung on the rail: stand-off armour over the thin hull side; every Brummbär wore them', on=f'skirt_rail_{s}')
+        mark(m, f'cross_{s}', 'de_cross', (0.50 + 1.07 * 2 + 0.51, sd * 1.53, 1.24), (0, sd, 0), 0.36, 0.36, f'skirt_{s}2', CROSS)
+        mark(m, f'number_{s}', 'de_num_102', (2.70, sd * 1.25, 2.12), (0, sd * 0.82, 0.32), 0.60, 0.30, 'casemate', NUM)
+
+
+def flak30(m):
+    if 'foot_0' in m.parts:
+        m.add('ammo_boxes', slab(-0.62, -0.20, 0.36, 0.66, 0.24, 0.44, 'steel'), 'magazine boxes on the platform by the loader: it empties a 20-round box in seconds', on='base')
+
+
+def nebelwerfer(m):
+    pass
+
+
 FINISH = {'us_scout': jeep, 'us_armoured_car': greyhound, 'us_light_tank': stuart, 'us_medium_tank': sherman, 'us_anti_tank_gun': at57,
           'us_anti_tank_gun_limbered': at57, 'us_heavy_tank': pershing, 'us_half_track': halftrack, 'us_tank_destroyer': wolverine,
           'us_truck': truck, 'us_light_tank_m24': chaffee,
           'de_scout': kradschuetzen, 'de_armoured_car': sdkfz222, 'de_light_tank': panzer2, 'de_medium_tank': panzer4, 'de_anti_tank_gun': pak40,
           'de_anti_tank_gun_limbered': pak40, 'de_heavy_tank': panther, 'de_half_track': sdkfz251, 'de_assault_gun': stug, 'de_truck': blitz,
-          'de_heavy_tank_tiger': tiger}
+          'de_heavy_tank_tiger': tiger,
+          'us_fast_tank_destroyer': hellcat, 'us_dozer_tank': dozer_sherman, 'de_tracked_scout': kettenkrad, 'de_scout_car': sdkfz221,
+          'de_tank_destroyer': marder3, 'de_anti_aircraft_tank': wirbelwind, 'de_assault_tank': brummbaer, 'de_anti_aircraft_gun': flak30,
+          'de_anti_aircraft_gun_limbered': flak30, 'de_rocket_launcher': nebelwerfer, 'de_rocket_launcher_limbered': nebelwerfer}
 # German armour and guns in the three-colour scheme; soft-skins (truck, motorcycle) stay plain dark yellow
 CAMO = {'de_armoured_car', 'de_light_tank', 'de_medium_tank', 'de_anti_tank_gun', 'de_anti_tank_gun_limbered', 'de_heavy_tank', 'de_half_track',
-        'de_assault_gun', 'de_heavy_tank_tiger', 'de_howitzer'}
+        'de_assault_gun', 'de_heavy_tank_tiger', 'de_howitzer', 'de_scout_car', 'de_tank_destroyer', 'de_anti_aircraft_tank', 'de_assault_tank',
+        'de_anti_aircraft_gun', 'de_anti_aircraft_gun_limbered', 'de_rocket_launcher', 'de_rocket_launcher_limbered'}
 
 
 def apply(m, key):

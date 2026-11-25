@@ -49,7 +49,7 @@ const COMBAT = (() => {
 
   /* ---------------- targets ---------------- */
   function maxRangeOf(e) {
-    if (e.type === 'vehicle') return Math.max(...e.def.weapons.map(w => D.W[w].rng[2]));
+    if (e.type === 'vehicle') return Math.max(0, ...e.def.weapons.map(w => D.W[w].rng[2]));
     let r = 0; for (const m of e.models) if (m.alive && m.weapon) r = Math.max(r, D.W[m.weapon].rng[2]);
     const cw = SIM.weaponOf(e); if (cw) r = Math.max(r, cw.rng[2]);
     return r || 35;
@@ -250,6 +250,7 @@ const COMBAT = (() => {
       }
     }
     v.fireT += dt;
+    if (!v.weapons.length) return;                     // unarmed (the Kettenkrad)
     const main = D.W[v.weapons[0].id];
     v.weapons.forEach((ws, i) => {
       const w = D.W[ws.id]; ws.cd -= dt; ws.since += dt;
@@ -509,7 +510,7 @@ const COMBAT = (() => {
     const c = v.crit || (v.crit = { engine: 0, gun: false, shockT: 0 }), r = G.rng();
     let what;
     if (r < .45) { if (c.engine >= 2) return; c.engine = c.engine === 1 && hf < .5 ? 2 : 1; what = c.engine === 2 ? 'engine2' : 'engine1'; }
-    else if (r < .65) { if (c.gun || D.W[v.weapons[0].id].kind === 'small') return; c.gun = true; what = 'gun'; }
+    else if (r < .65) { if (c.gun || !v.weapons.length || D.W[v.weapons[0].id].kind === 'small') return; c.gun = true; what = 'gun'; }
     else { c.shockT = G.t + CRIT.shock; what = 'shock'; }
     SIM.event(G, v.owner, 'lost', v.def.name + ': ' + CRIT.names[what], v.x, v.y);
   }
